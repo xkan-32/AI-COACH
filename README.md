@@ -1,1 +1,44 @@
-# AI-COACH
+# AI Training Coach MVP
+
+Stravaのアクティビティ取得を起点に、LINEで体調を確認し、Vertex AIで翌日のメニューを提案、ユーザー承認後にStrava Descriptionへ反映するMVPです。
+
+## MVPフロー
+
+1. Strava webhookがアクティビティ作成を通知する
+2. APIがStravaから詳細を取得し、BigQueryへ保存する
+3. LINEで体調確認を送る
+4. LINE回答を受け、直近履歴と安全ルールをVertex AIへ渡す
+5. 翌日メニュー案をLINEへ送る
+6. ユーザーが承認または却下する
+7. 承認時のみ、提案要約を対象アクティビティのStrava Descriptionへ追記する
+
+詳細は [docs/implementation-plan.md](docs/implementation-plan.md) と [docs/architecture.md](docs/architecture.md) を参照してください。 初回GCP/WIF/GitHub Actions構築は [docs/bootstrap-and-cicd.md](docs/bootstrap-and-cicd.md) に手順があります。
+
+## ローカル起動
+
+Python 3.12を想定しています。
+
+```powershell
+python -m venv .venv
+.venv\Scripts\Activate.ps1
+pip install -e ".[dev]"
+Copy-Item .env.example .env
+uvicorn app.main:app --reload
+```
+
+```powershell
+pytest
+```
+
+外部サービスの認証情報がなくても、`APP_ENV=local` ではヘルスチェックとWebhook検証のテストを実行できます。
+
+## エンドポイント
+
+- `GET /health`（Cloud Run外部監視用。`/healthz` はローカル互換）
+- `GET /webhooks/strava` - webhook購読検証
+- `POST /webhooks/strava` - アクティビティ通知
+- `POST /webhooks/line` - 体調回答・承認操作
+
+## 実装順
+
+最初にStrava/LINEの開発アプリ、GCPプロジェクト、Secret Manager、BigQuery datasetを用意します。その後、OAuthトークン保存、実APIアダプター、非同期ジョブ、Vertex AI構造化出力の順に接続します。

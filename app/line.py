@@ -1,0 +1,103 @@
+import httpx
+
+from app.domain.models import Activity, WorkoutProposal
+
+
+class LineApiError(RuntimeError):
+    pass
+
+
+class LineConditionPromptSender:
+    push_url = "https://api.line.me/v2/bot/message/push"
+
+    def __init__(
+        self, channel_access_token: str, timeout_seconds: float = 10.0
+    ) -> None:
+        self._token = channel_access_token
+        self._timeout = timeout_seconds
+
+    async def send(self, line_user_id: str, activity: Activity) -> None:
+        labels = [
+            ("良好", "good"),
+            ("疲労あり", "fatigued"),
+            ("違和感あり", "discomfort"),
+            ("痛みあり", "pain"),
+        ]
+        items = [
+            {
+                "type": "action",
+                "action": {
+                    "type": "postback",
+                    "label": label,
+                    "data": f"action=condition&activity_id={activity.id}&level={value}",
+                    "displayText": label,
+                },
+            }
+            for label, value in labels
+        ]
+        await self._push(
+            line_user_id,
+            {
+                "type": "text",
+                "text": "お疲れさまでした。今日の状態を教えてください。",
+                "quickReply": {"items": items},
+            },
+        )
+
+    async def send_text(self, line_user_id: str, text: str) -> None:
+        await self._push(line_user_id, {"type": "text", "text": text})
+
+    async def send_proposal(self, line_user_id: str, proposal: WorkoutProposal) -> None:
+        items = [
+            {
+                "type": "action",
+                "action": {
+                    "type": "postback",
+                    "label": label,
+                    "data": (
+                        f"action=proposal&proposal_id={proposal.id}&decision={decision}"
+                    ),
+                },
+            }
+            for label, decision in (("承認", "approve"), ("却下", "reject"))
+        ]
+        await self._push(
+            line_user_id,
+            {
+                "type": "text",
+                "text": (
+                    f"明日の提案: {proposal.title}"
+                    f"（{proposal.duration_minutes}分・{proposal.intensity}）\n"
+                    f"{proposal.rationale}"
+                ),
+                "quickReply": {"items": items},
+            },
+        )
+
+    async def _push(self, line_user_id: str, message: dict) -> None:
+        try:
+            async with httpx.AsyncClient(timeout=self._timeout) as client:
+                response = await client.post(
+                    self.push_url,
+                    headers={"Authorization": f"Bearer {self._token}"},
+                    json={"to": line_user_id, "messages": [message]},
+                )
+                response.raise_for_status()
+        except httpx.HTTPError as exc:
+            raise LineApiError("LINE message failed") from exc
+
+
+class InMemoryConditionPromptSender:
+    def __init__(self) -> None:
+        self.sent: list[tuple[str, Activity]] = []
+        self.texts: list[tuple[str, str]] = []
+        self.proposals: list[tuple[str, WorkoutProposal]] = []
+
+    async def send(self, line_user_id: str, activity: Activity) -> None:
+        self.sent.append((line_user_id, activity))
+
+    async def send_text(self, line_user_id: str, text: str) -> None:
+        self.texts.append((line_user_id, text))
+
+    async def send_proposal(self, line_user_id: str, proposal: WorkoutProposal) -> None:
+        self.proposals.append((line_user_id, proposal))
