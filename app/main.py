@@ -128,6 +128,14 @@ async def decide_proposal_task(
         raise HTTPException(status_code=403, detail=str(exc)) from exc
     except ProposalExpired as exc:
         raise HTTPException(status_code=410, detail=str(exc)) from exc
+    messages = {
+        "approved": "Stravaへの投稿が完了しました。",
+        "rejected": "この提案は投稿しませんでした。",
+        "duplicate": "この提案はすでに処理済みです。",
+    }
+    await runtime.messenger.send_text(
+        task.line_user_id, messages.get(result, "処理が完了しました。")
+    )
     return {"status": result}
 
 

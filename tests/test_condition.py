@@ -135,3 +135,32 @@ async def test_expired_condition_draft_rejects_late_reply() -> None:
         await workflow.handle_text("line-1", "右膝")
 
     assert await drafts.get("line-1") is None
+
+
+async def test_condition_acknowledgement_precedes_proposal_message() -> None:
+    contexts = InMemoryActivityContextStore()
+    drafts = InMemoryConditionDraftStore()
+    reports = InMemoryConditionReportStore()
+    messenger = InMemoryConditionPromptSender()
+    await contexts.save(ActivityContext("activity-1", "athlete-1", "line-1"))
+
+    async def send_proposal(_report) -> None:
+        await messenger.send_text("line-1", "AI提案")
+
+    workflow = ConditionWorkflow(
+        contexts,
+        drafts,
+        reports,
+        messenger,
+        on_completed=send_proposal,
+        clock=lambda: datetime(2026, 9, 1, tzinfo=UTC),
+    )
+
+    await workflow.handle_postback(
+        "line-1", "action=condition&activity_id=activity-1&level=good"
+    )
+
+    assert [text for _, text in messenger.texts] == [
+        "体調を記録しました。ありがとうございます。",
+        "AI提案",
+    ]

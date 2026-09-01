@@ -67,6 +67,7 @@ class LineConditionPromptSender:
                             int(proposal.expires_at.timestamp()),
                         )
                     ),
+                    "displayText": label,
                 },
             }
             for label, decision in (("投稿", "approve"), ("投稿しない", "reject"))

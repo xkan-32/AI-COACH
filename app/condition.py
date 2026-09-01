@@ -94,11 +94,11 @@ class ConditionWorkflow:
                 reported_at=self._clock(),
             )
             await self._reports.save(report)
-            if self._on_completed is not None:
-                await self._on_completed(report)
             await self._messenger.send_text(
                 line_user_id, "体調を記録しました。ありがとうございます。"
             )
+            if self._on_completed is not None:
+                await self._on_completed(report)
             return "completed"
         await self._drafts.save(
             ConditionDraft(
@@ -174,12 +174,12 @@ class ConditionWorkflow:
             reported_at=self._clock(),
         )
         await self._reports.save(report)
-        if self._on_completed is not None:
-            await self._on_completed(report)
         await self._drafts.delete(line_user_id)
         await self._messenger.send_text(
             line_user_id, "体調を記録しました。無理をせず休息を優先してください。"
         )
+        if self._on_completed is not None:
+            await self._on_completed(report)
         return "completed"
 
 
