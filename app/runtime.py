@@ -36,6 +36,14 @@ from app.ingestion import (
     InMemoryActivityStore,
 )
 from app.line import InMemoryConditionPromptSender, LineConditionPromptSender
+from app.profile import (
+    FirestoreGoalStore,
+    FirestoreTrainingResourceStore,
+    GoalStore,
+    InMemoryGoalStore,
+    InMemoryTrainingResourceStore,
+    TrainingResourceStore,
+)
 from app.state import (
     EventStore,
     FirestoreEventStore,
@@ -75,6 +83,8 @@ class Runtime:
     proposal_states: ProposalStateStore
     proposal_analytics: ProposalAnalyticsStore
     proposal_tasks: ProposalDecisionPublisher
+    goals: GoalStore
+    training_resources: TrainingResourceStore
 
 
 def build_runtime(settings: Settings) -> Runtime:
@@ -99,6 +109,8 @@ def build_runtime(settings: Settings) -> Runtime:
             proposal_states=proposal_states,
             proposal_analytics=analytics,
             proposal_tasks=InMemoryProposalDecisionPublisher(),
+            goals=InMemoryGoalStore(),
+            training_resources=InMemoryTrainingResourceStore(),
         )
     required = {
         "gcp_project_id": settings.gcp_project_id,
@@ -156,4 +168,6 @@ def build_runtime(settings: Settings) -> Runtime:
             settings.worker_url,
             settings.task_service_account_email,
         ),
+        goals=FirestoreGoalStore(firestore_client),
+        training_resources=FirestoreTrainingResourceStore(firestore_client),
     )

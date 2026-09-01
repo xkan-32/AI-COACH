@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 from app.domain.models import (
     Activity,
     ApprovalStatus,
+    CoachingContext,
     ConditionLevel,
     ConditionReport,
     WorkoutProposal,
@@ -26,7 +27,7 @@ class CoachOutput(BaseModel):
 
 class CoachGenerator(Protocol):
     async def generate(
-        self, activity: Activity, report: ConditionReport
+        self, activity: Activity, report: ConditionReport, context: CoachingContext
     ) -> CoachOutput: ...
 
 
@@ -46,7 +47,7 @@ class VertexCoachGenerator:
         self._model = model
 
     async def generate(
-        self, activity: Activity, report: ConditionReport
+        self, activity: Activity, report: ConditionReport, context: CoachingContext
     ) -> CoachOutput:
         from google.genai import types
 
@@ -55,6 +56,7 @@ class VertexCoachGenerator:
             {
                 "activity": activity.model_dump(mode="json"),
                 "condition": report.model_dump(mode="json"),
+                "coaching_context": context.model_dump(mode="json"),
                 "mandatory_constraints": constraints,
                 "task": "Propose one conservative workout for the next day in Japanese.",
             },
@@ -80,7 +82,7 @@ class VertexCoachGenerator:
 
 class LocalCoachGenerator:
     async def generate(
-        self, activity: Activity, report: ConditionReport
+        self, activity: Activity, report: ConditionReport, context: CoachingContext
     ) -> CoachOutput:
         return CoachOutput(
             title="回復を優先した軽い運動",
@@ -119,10 +121,15 @@ class CoachingService:
         self._sender = sender
 
     async def create_proposal(
-        self, activity: Activity, report: ConditionReport, line_user_id: str
+        self,
+        activity: Activity,
+        report: ConditionReport,
+        line_user_id: str,
+        context: CoachingContext | None = None,
     ) -> WorkoutProposal:
+        context = context or CoachingContext()
         generated = enforce_safety(
-            await self._generator.generate(activity, report), report
+            await self._generator.generate(activity, report, context), report
         )
         proposal = WorkoutProposal(
             id=str(uuid.uuid4()),

@@ -9,9 +9,11 @@ from app.coaching import CoachingService
 from app.condition import ConditionWorkflow, InvalidConditionAction
 from app.config import get_settings
 from app.domain.events import StravaWebhookEvent
+from app.domain.models import CoachingContext
 from app.ingestion import ActivityIngestionService, UnknownAthleteToken
 from app.oauth import InvalidOAuthState, OAuthStateSigner, strava_authorization_url
 from app.oauth_service import StravaOAuthService, UnknownOAuthSession
+from app.profile import ProfileCommandError, ProfileCommandService
 from app.runtime import build_runtime
 from app.security import verify_cloud_task_request
 from app.strava import StravaApiError, StravaOAuthClient, StravaOAuthError
@@ -158,7 +160,15 @@ async def receive_line_webhook(request: Request) -> Response:
         service = CoachingService(
             runtime.coach, runtime.proposals, runtime.proposal_sender
         )
-        await service.create_proposal(activity, report, context.line_user_id)
+        coaching_context = CoachingContext(
+            goals=await runtime.goals.list(context.line_user_id),
+            training_resources=await runtime.training_resources.list(
+                context.line_user_id
+            ),
+        )
+        await service.create_proposal(
+            activity, report, context.line_user_id, coaching_context
+        )
 
     workflow = ConditionWorkflow(
         runtime.activity_contexts,
@@ -166,6 +176,9 @@ async def receive_line_webhook(request: Request) -> Response:
         runtime.condition_reports,
         runtime.messenger,
         on_completed=create_proposal,
+    )
+    profile_commands = ProfileCommandService(
+        runtime.goals, runtime.training_resources, runtime.messenger
     )
     for event in payload.get("events", []):
         event_type = event.get("type")
@@ -205,9 +218,13 @@ async def receive_line_webhook(request: Request) -> Response:
                         f"{authorization_url}",
                     )
                     continue
+                if await profile_commands.handle(line_user_id, text):
+                    continue
                 await workflow.handle_text(line_user_id, text)
             else:
                 continue
         except InvalidConditionAction as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        except ProfileCommandError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
     return Response(status_code=200)
