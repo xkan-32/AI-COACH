@@ -87,7 +87,7 @@ class BigQueryActivityStore:
         self._table = table
 
     async def get(self, activity_id: str) -> Activity | None:
-        query = f"SELECT activity_id, athlete_id, activity_type, started_at, duration_seconds, distance_meters, description FROM `{self._table}` WHERE activity_id =  LIMIT 1"
+        query = f"SELECT activity_id, athlete_id, activity_type, started_at, duration_seconds, distance_meters, description FROM `{self._table}` WHERE activity_id = @activity_id LIMIT 1"
         from google.cloud import bigquery
 
         config = bigquery.QueryJobConfig(
