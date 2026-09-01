@@ -61,26 +61,37 @@ class LineConditionPromptSender:
             }
             for label, decision in (("承認", "approve"), ("却下", "reject"))
         ]
-        await self._push(
+        summary = (
+            f"明日の提案: {proposal.title}"
+            f"（{proposal.duration_minutes}分・{proposal.intensity}）\n"
+            f"{proposal.rationale}"
+        )
+        await self._push_many(
             line_user_id,
-            {
-                "type": "text",
-                "text": (
-                    f"明日の提案: {proposal.title}"
-                    f"（{proposal.duration_minutes}分・{proposal.intensity}）\n"
-                    f"{proposal.rationale}"
-                ),
-                "quickReply": {"items": items},
-            },
+            [
+                {"type": "text", "text": summary},
+                {
+                    "type": "template",
+                    "altText": "明日の提案を承認または却下してください。",
+                    "template": {
+                        "type": "buttons",
+                        "text": "この提案をStravaへ反映しますか？",
+                        "actions": [item["action"] for item in items],
+                    },
+                },
+            ],
         )
 
     async def _push(self, line_user_id: str, message: dict) -> None:
+        await self._push_many(line_user_id, [message])
+
+    async def _push_many(self, line_user_id: str, messages: list[dict]) -> None:
         try:
             async with httpx.AsyncClient(timeout=self._timeout) as client:
                 response = await client.post(
                     self.push_url,
                     headers={"Authorization": f"Bearer {self._token}"},
-                    json={"to": line_user_id, "messages": [message]},
+                    json={"to": line_user_id, "messages": messages},
                 )
                 response.raise_for_status()
         except httpx.HTTPError as exc:
