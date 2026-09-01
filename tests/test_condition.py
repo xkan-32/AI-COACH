@@ -4,7 +4,9 @@ import pytest
 
 from app.condition import (
     ActivityContext,
+    ConditionDraft,
     ConditionWorkflow,
+    FirestoreConditionDraftStore,
     InMemoryActivityContextStore,
     InMemoryConditionDraftStore,
     InMemoryConditionReportStore,
@@ -73,3 +75,41 @@ async def test_severity_must_be_between_one_and_ten() -> None:
     await workflow.handle_text("line-1", "左膝")
     with pytest.raises(InvalidConditionAction, match="1〜10"):
         await workflow.handle_text("line-1", "11")
+
+
+class FakeSnapshot:
+    exists = True
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "activity_id": "activity-1",
+            "athlete_id": "athlete-1",
+            "line_user_id": "line-1",
+            "level": "pain",
+            "step": "severity",
+            "body_part": "右ふくらはぎ",
+            "severity": None,
+        }
+
+
+class FakeDocument:
+    async def get(self) -> FakeSnapshot:
+        return FakeSnapshot()
+
+
+class FakeCollection:
+    def document(self, _document_id: str) -> FakeDocument:
+        return FakeDocument()
+
+
+class FakeFirestoreClient:
+    def collection(self, _name: str) -> FakeCollection:
+        return FakeCollection()
+
+
+async def test_firestore_draft_restores_condition_level_enum() -> None:
+    store = FirestoreConditionDraftStore(FakeFirestoreClient())
+    draft = await store.get("line-1")
+
+    assert isinstance(draft, ConditionDraft)
+    assert draft.level.value == "pain"

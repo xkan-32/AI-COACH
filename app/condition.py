@@ -244,7 +244,11 @@ class FirestoreConditionDraftStore:
             .document(line_user_id)
             .get()
         )
-        return ConditionDraft(**snapshot.to_dict()) if snapshot.exists else None
+        if not snapshot.exists:
+            return None
+        values = snapshot.to_dict()
+        values["level"] = ConditionLevel(values["level"])
+        return ConditionDraft(**values)
 
     async def delete(self, line_user_id: str) -> None:
         await (
