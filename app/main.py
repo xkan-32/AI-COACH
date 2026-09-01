@@ -21,6 +21,17 @@ app = FastAPI(title="AI Training Coach", version="0.3.0")
 runtime = build_runtime(get_settings())
 
 
+async def create_strava_authorization_url(line_user_id: str) -> str:
+    settings = get_settings()
+    if not settings.strava_client_id:
+        raise HTTPException(status_code=503, detail="Strava OAuth is not configured")
+    state_token, state = OAuthStateSigner(settings.oauth_state_signing_key).create()
+    await runtime.oauth_sessions.create(state.nonce, line_user_id, state.expires_at)
+    return strava_authorization_url(
+        settings.strava_client_id, settings.strava_redirect_uri, state_token
+    )
+
+
 @app.get("/health")
 @app.get("/healthz", include_in_schema=False)
 async def health() -> dict[str, str]:
@@ -106,16 +117,7 @@ async def decide_proposal_task(
 
 @app.get("/oauth/strava/start")
 async def start_strava_oauth(line_user_id: str) -> RedirectResponse:
-    settings = get_settings()
-    if not settings.strava_client_id:
-        raise HTTPException(status_code=503, detail="Strava OAuth is not configured")
-    state_token, state = OAuthStateSigner(settings.oauth_state_signing_key).create()
-    await runtime.oauth_sessions.create(state.nonce, line_user_id, state.expires_at)
-    return RedirectResponse(
-        strava_authorization_url(
-            settings.strava_client_id, settings.strava_redirect_uri, state_token
-        )
-    )
+    return RedirectResponse(await create_strava_authorization_url(line_user_id))
 
 
 @app.get("/oauth/strava/callback")
@@ -191,9 +193,19 @@ async def receive_line_webhook(request: Request) -> Response:
                 event_type == "message"
                 and event.get("message", {}).get("type") == "text"
             ):
-                await workflow.handle_text(
-                    line_user_id, event["message"].get("text", "")
-                )
+                text = event["message"].get("text", "")
+                if text.strip().lower() in {"strava連携", "strava 連携"}:
+                    authorization_url = await create_strava_authorization_url(
+                        line_user_id
+                    )
+                    await runtime.messenger.send_text(
+                        line_user_id,
+                        "次のURLからStrava連携を許可してください。"
+                        "このURLは10分間有効です。\n"
+                        f"{authorization_url}",
+                    )
+                    continue
+                await workflow.handle_text(line_user_id, text)
             else:
                 continue
         except InvalidConditionAction as exc:
