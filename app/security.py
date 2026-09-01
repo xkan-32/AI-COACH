@@ -25,3 +25,54 @@ async def verify_cloud_task_request(request, settings) -> None:
         ) from exc
     if claims.get("email") != settings.task_service_account_email:
         raise HTTPException(status_code=403, detail="Unexpected task service account")
+
+
+class ApprovalActionError(ValueError):
+    pass
+
+
+class ApprovalActionSigner:
+    def __init__(self, secret: str, clock=None) -> None:
+        import time
+
+        self._secret = secret.encode()
+        self._clock = clock or time.time
+
+    def create(
+        self,
+        proposal_id: str,
+        line_user_id: str,
+        decision: str,
+        expires_at: int,
+    ) -> str:
+        import hashlib
+        import hmac
+
+        payload = f"{proposal_id}:{line_user_id}:{decision}:{expires_at}"
+        signature = hmac.new(self._secret, payload.encode(), hashlib.sha256).hexdigest()
+        return (
+            f"action=proposal&proposal_id={proposal_id}&decision={decision}"
+            f"&expires_at={expires_at}&signature={signature}"
+        )
+
+    def verify(
+        self,
+        proposal_id: str,
+        line_user_id: str,
+        decision: str,
+        expires_at: str,
+        signature: str,
+    ) -> None:
+        import hashlib
+        import hmac
+
+        try:
+            expiry = int(expires_at)
+        except ValueError as exc:
+            raise ApprovalActionError("Invalid approval expiry") from exc
+        if expiry < int(self._clock()):
+            raise ApprovalActionError("Approval action has expired")
+        payload = f"{proposal_id}:{line_user_id}:{decision}:{expiry}"
+        expected = hmac.new(self._secret, payload.encode(), hashlib.sha256).hexdigest()
+        if not hmac.compare_digest(expected, signature):
+            raise ApprovalActionError("Invalid approval signature")

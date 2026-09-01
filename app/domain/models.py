@@ -1,4 +1,4 @@
-from datetime import date, datetime
+from datetime import UTC, date, datetime, timedelta
 from enum import StrEnum
 
 from pydantic import BaseModel, Field
@@ -76,3 +76,6 @@ class WorkoutProposal(BaseModel):
     intensity: str
     safety_notes: list[str] = Field(default_factory=list)
     status: ApprovalStatus = ApprovalStatus.PENDING
+    expires_at: datetime = Field(
+        default_factory=lambda: datetime.now(UTC) + timedelta(hours=24)
+    )

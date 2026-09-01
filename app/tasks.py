@@ -115,3 +115,53 @@ class CloudTasksProposalDecisionPublisher:
 
 
 from app.approval import ProposalDecisionTask
+
+
+class LineEventTaskPublisher(Protocol):
+    async def publish(self, event_key: str, event: dict) -> None: ...
+
+
+class InMemoryLineEventTaskPublisher:
+    def __init__(self) -> None:
+        self.items: list[tuple[str, dict]] = []
+
+    async def publish(self, event_key: str, event: dict) -> None:
+        self.items.append((event_key, event))
+
+
+class CloudTasksLineEventPublisher:
+    def __init__(
+        self,
+        client_factory: object,
+        queue_path: str,
+        worker_url: str,
+        service_account_email: str,
+    ) -> None:
+        self._client_factory = client_factory
+        self._queue_path = queue_path
+        self._worker_url = worker_url
+        self._service_account_email = service_account_email
+
+    async def publish(self, event_key: str, event: dict) -> None:
+        from google.api_core.exceptions import AlreadyExists
+        from google.cloud import tasks_v2
+
+        task_id = hashlib.sha256(f"line:{event_key}".encode()).hexdigest()
+        request = tasks_v2.Task(
+            name=f"{self._queue_path}/tasks/{task_id}",
+            http_request=tasks_v2.HttpRequest(
+                http_method=tasks_v2.HttpMethod.POST,
+                url=f"{self._worker_url.rstrip('/')}/tasks/line/events",
+                headers={"Content-Type": "application/json"},
+                body=json.dumps({"event_key": event_key, "event": event}).encode(),
+                oidc_token=tasks_v2.OidcToken(
+                    service_account_email=self._service_account_email,
+                    audience=self._worker_url,
+                ),
+            ),
+        )
+        try:
+            client = self._client_factory()
+            await client.create_task(parent=self._queue_path, task=request)
+        except AlreadyExists:
+            return

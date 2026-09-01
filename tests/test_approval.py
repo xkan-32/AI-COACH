@@ -6,6 +6,7 @@ from app.approval import (
     ApprovalService,
     InMemoryProposalStateStore,
     ProposalDecisionTask,
+    ProposalExpired,
     ProposalOwnerMismatch,
 )
 from app.coaching import InMemoryProposalStore
@@ -96,3 +97,16 @@ async def test_decision_rejects_different_line_user() -> None:
     service, _, _ = await setup_service()
     with pytest.raises(ProposalOwnerMismatch):
         await service.decide(ProposalDecisionTask("proposal-1", "attacker", "approve"))
+
+
+async def test_expired_approval_does_not_touch_strava() -> None:
+    from datetime import UTC, datetime, timedelta
+
+    strava = FakeStrava()
+    service, states, _ = await setup_service(strava)
+    states.items["proposal-1"][0].expires_at = datetime.now(UTC) - timedelta(seconds=1)
+
+    with pytest.raises(ProposalExpired):
+        await service.decide(ProposalDecisionTask("proposal-1", "line-user", "approve"))
+
+    assert strava.updates == []

@@ -4,7 +4,11 @@ from app.domain.events import StravaWebhookEvent
 from app.oauth_service import StravaOAuthService
 from app.state import InMemoryOAuthSessionStore, InMemoryStravaTokenStore
 from app.strava import StravaOAuthClient
-from app.tasks import CloudTasksActivityPublisher, InMemoryActivityTaskPublisher
+from app.tasks import (
+    CloudTasksActivityPublisher,
+    CloudTasksLineEventPublisher,
+    InMemoryActivityTaskPublisher,
+)
 
 
 async def test_oauth_exchange_is_saved_without_returning_tokens() -> None:
@@ -85,3 +89,27 @@ async def test_cloud_task_client_is_created_inside_publish() -> None:
 
     assert len(calls) == 1
     assert calls[0]["parent"].endswith("/queues/queue")
+
+
+async def test_line_event_cloud_task_targets_worker() -> None:
+    calls = []
+
+    class FakeClient:
+        async def create_task(self, **kwargs) -> None:
+            calls.append(kwargs)
+
+    publisher = CloudTasksLineEventPublisher(
+        FakeClient,
+        "projects/project/locations/region/queues/queue",
+        "https://coach.example",
+        "tasks@example.iam.gserviceaccount.com",
+    )
+
+    await publisher.publish(
+        "line-event-1",
+        {"type": "message", "message": {"type": "text", "text": "目標確認"}},
+    )
+
+    request = calls[0]["task"].http_request
+    assert request.url == "https://coach.example/tasks/line/events"
+    assert b"line-event-1" in request.body

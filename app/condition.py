@@ -1,7 +1,7 @@
 import asyncio
 from collections.abc import Awaitable, Callable
-from dataclasses import asdict, dataclass
-from datetime import UTC, datetime
+from dataclasses import asdict, dataclass, field
+from datetime import UTC, datetime, timedelta
 from typing import Protocol
 from urllib.parse import parse_qs
 
@@ -13,6 +13,9 @@ class ActivityContext:
     activity_id: str
     athlete_id: str
     line_user_id: str
+    expires_at: datetime = field(
+        default_factory=lambda: datetime.now(UTC) + timedelta(days=7)
+    )
 
 
 @dataclass(frozen=True)
@@ -24,6 +27,9 @@ class ConditionDraft:
     step: str = "body_part"
     body_part: str | None = None
     severity: int | None = None
+    expires_at: datetime = field(
+        default_factory=lambda: datetime.now(UTC) + timedelta(hours=24)
+    )
 
 
 class ActivityContextStore(Protocol):
@@ -78,6 +84,8 @@ class ConditionWorkflow:
         context = await self._contexts.get(activity_id)
         if context is None or context.line_user_id != line_user_id:
             raise InvalidConditionAction("Activity does not belong to this LINE user")
+        if context.expires_at <= self._clock():
+            raise InvalidConditionAction("この体調確認は期限切れです。")
         if level in {ConditionLevel.GOOD, ConditionLevel.FATIGUED}:
             report = ConditionReport(
                 athlete_id=context.athlete_id,
@@ -109,6 +117,9 @@ class ConditionWorkflow:
         draft = await self._drafts.get(line_user_id)
         if draft is None:
             return "ignored"
+        if draft.expires_at <= self._clock():
+            await self._drafts.delete(line_user_id)
+            raise InvalidConditionAction("体調入力の有効期限が切れました。")
         value = text.strip()
         if draft.step == "body_part":
             if not value or len(value) > 100:

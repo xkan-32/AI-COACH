@@ -58,9 +58,12 @@ from app.state import (
 from app.tasks import (
     ActivityTaskPublisher,
     CloudTasksActivityPublisher,
+    CloudTasksLineEventPublisher,
     CloudTasksProposalDecisionPublisher,
     InMemoryActivityTaskPublisher,
+    InMemoryLineEventTaskPublisher,
     InMemoryProposalDecisionPublisher,
+    LineEventTaskPublisher,
     ProposalDecisionPublisher,
 )
 
@@ -71,6 +74,7 @@ class Runtime:
     oauth_sessions: OAuthSessionStore
     tokens: StravaTokenStore
     tasks: ActivityTaskPublisher
+    line_tasks: LineEventTaskPublisher
     activities: ActivityStore
     activity_contexts: ActivityContextStore
     condition_prompts: ConditionPromptSender
@@ -97,6 +101,7 @@ def build_runtime(settings: Settings) -> Runtime:
             oauth_sessions=InMemoryOAuthSessionStore(),
             tokens=InMemoryStravaTokenStore(),
             tasks=InMemoryActivityTaskPublisher(),
+            line_tasks=InMemoryLineEventTaskPublisher(),
             activities=InMemoryActivityStore(),
             activity_contexts=InMemoryActivityContextStore(),
             condition_prompts=line,
@@ -134,7 +139,10 @@ def build_runtime(settings: Settings) -> Runtime:
         vertexai=True, project=settings.gcp_project_id, location=settings.gcp_region
     )
     table_prefix = f"{settings.gcp_project_id}.{settings.bigquery_dataset}"
-    line = LineConditionPromptSender(settings.line_channel_access_token)
+    line = LineConditionPromptSender(
+        settings.line_channel_access_token,
+        action_signing_key=settings.oauth_state_signing_key,
+    )
     proposal_states = FirestoreProposalStateStore(firestore_client)
     proposal_analytics = BigQueryProposalStore(
         bigquery_client, f"{table_prefix}.proposals", settings.vertex_model
@@ -144,6 +152,12 @@ def build_runtime(settings: Settings) -> Runtime:
         oauth_sessions=FirestoreOAuthSessionStore(firestore_client),
         tokens=FirestoreStravaTokenStore(firestore_client),
         tasks=CloudTasksActivityPublisher(
+            tasks_v2.CloudTasksAsyncClient,
+            settings.cloud_tasks_queue_path,
+            settings.worker_url,
+            settings.task_service_account_email,
+        ),
+        line_tasks=CloudTasksLineEventPublisher(
             tasks_v2.CloudTasksAsyncClient,
             settings.cloud_tasks_queue_path,
             settings.worker_url,
