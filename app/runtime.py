@@ -117,7 +117,6 @@ def build_runtime(settings: Settings) -> Runtime:
     firestore_client = firestore.AsyncClient(
         project=settings.gcp_project_id, database=settings.firestore_database
     )
-    tasks_client = tasks_v2.CloudTasksAsyncClient()
     bigquery_client = bigquery.Client(project=settings.gcp_project_id)
     genai_client = genai.Client(
         vertexai=True, project=settings.gcp_project_id, location=settings.gcp_region
@@ -133,7 +132,7 @@ def build_runtime(settings: Settings) -> Runtime:
         oauth_sessions=FirestoreOAuthSessionStore(firestore_client),
         tokens=FirestoreStravaTokenStore(firestore_client),
         tasks=CloudTasksActivityPublisher(
-            tasks_client,
+            tasks_v2.CloudTasksAsyncClient,
             settings.cloud_tasks_queue_path,
             settings.worker_url,
             settings.task_service_account_email,
@@ -152,7 +151,7 @@ def build_runtime(settings: Settings) -> Runtime:
         proposal_states=proposal_states,
         proposal_analytics=proposal_analytics,
         proposal_tasks=CloudTasksProposalDecisionPublisher(
-            tasks_client,
+            tasks_v2.CloudTasksAsyncClient,
             settings.cloud_tasks_queue_path,
             settings.worker_url,
             settings.task_service_account_email,

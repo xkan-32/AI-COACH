@@ -4,7 +4,7 @@ from app.domain.events import StravaWebhookEvent
 from app.oauth_service import StravaOAuthService
 from app.state import InMemoryOAuthSessionStore, InMemoryStravaTokenStore
 from app.strava import StravaOAuthClient
-from app.tasks import InMemoryActivityTaskPublisher
+from app.tasks import CloudTasksActivityPublisher, InMemoryActivityTaskPublisher
 
 
 async def test_oauth_exchange_is_saved_without_returning_tokens() -> None:
@@ -57,3 +57,31 @@ async def test_activity_event_is_published() -> None:
     )
     await publisher.publish(event)
     assert publisher.events == [event]
+
+
+async def test_cloud_task_client_is_created_inside_publish() -> None:
+    calls = []
+
+    class FakeClient:
+        async def create_task(self, **kwargs) -> None:
+            calls.append(kwargs)
+
+    publisher = CloudTasksActivityPublisher(
+        FakeClient,
+        "projects/project/locations/region/queues/queue",
+        "https://coach.example",
+        "tasks@example.iam.gserviceaccount.com",
+    )
+    event = StravaWebhookEvent(
+        object_type="activity",
+        object_id=10,
+        aspect_type="create",
+        owner_id=20,
+        subscription_id=30,
+        event_time=1_700_000_000,
+    )
+
+    await publisher.publish(event)
+
+    assert len(calls) == 1
+    assert calls[0]["parent"].endswith("/queues/queue")

@@ -20,12 +20,12 @@ class InMemoryActivityTaskPublisher:
 class CloudTasksActivityPublisher:
     def __init__(
         self,
-        client: object,
+        client_factory: object,
         queue_path: str,
         worker_url: str,
         service_account_email: str,
     ):
-        self._client = client
+        self._client_factory = client_factory
         self._queue_path = queue_path
         self._worker_url = worker_url
         self._service_account_email = service_account_email
@@ -47,7 +47,8 @@ class CloudTasksActivityPublisher:
                 ),
             ),
         )
-        await self._client.create_task(parent=self._queue_path, task=task)
+        client = self._client_factory()
+        await client.create_task(parent=self._queue_path, task=task)
 
 
 class ProposalDecisionPublisher(Protocol):
@@ -69,12 +70,12 @@ class InMemoryProposalDecisionPublisher:
 class CloudTasksProposalDecisionPublisher:
     def __init__(
         self,
-        client: object,
+        client_factory: object,
         queue_path: str,
         worker_url: str,
         service_account_email: str,
     ):
-        self._client = client
+        self._client_factory = client_factory
         self._queue_path = queue_path
         self._worker_url = worker_url
         self._service_account_email = service_account_email
@@ -107,7 +108,8 @@ class CloudTasksProposalDecisionPublisher:
         from google.api_core.exceptions import AlreadyExists
 
         try:
-            await self._client.create_task(parent=self._queue_path, task=request)
+            client = self._client_factory()
+            await client.create_task(parent=self._queue_path, task=request)
         except AlreadyExists:
             return
 
