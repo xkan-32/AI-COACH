@@ -6,6 +6,7 @@ from app.strava import StoredStravaToken
 class EventStore(Protocol):
     async def reserve(self, provider: str, event_key: str) -> bool: ...
     async def release(self, provider: str, event_key: str) -> None: ...
+    async def complete(self, provider: str, event_key: str) -> None: ...
 
 
 class OAuthSessionStore(Protocol):
@@ -31,6 +32,9 @@ class InMemoryEventStore:
 
     async def release(self, provider: str, event_key: str) -> None:
         self._keys.discard((provider, event_key))
+
+    async def complete(self, provider: str, event_key: str) -> None:
+        return None
 
 
 class InMemoryOAuthSessionStore:
@@ -77,6 +81,13 @@ class FirestoreEventStore:
 
     async def release(self, provider: str, event_key: str) -> None:
         await self._document(provider, event_key).delete()
+
+    async def complete(self, provider: str, event_key: str) -> None:
+        from datetime import UTC, datetime
+
+        await self._document(provider, event_key).update(
+            {"status": "completed", "processed_at": datetime.now(UTC)}
+        )
 
 
 class FirestoreOAuthSessionStore:

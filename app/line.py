@@ -1,6 +1,7 @@
 import httpx
 
 from app.domain.models import Activity, WorkoutProposal
+from app.security import ApprovalActionSigner
 
 
 class LineApiError(RuntimeError):
@@ -11,10 +12,14 @@ class LineConditionPromptSender:
     push_url = "https://api.line.me/v2/bot/message/push"
 
     def __init__(
-        self, channel_access_token: str, timeout_seconds: float = 10.0
+        self,
+        channel_access_token: str,
+        timeout_seconds: float = 10.0,
+        action_signing_key: str = "local-development-only",
     ) -> None:
         self._token = channel_access_token
         self._timeout = timeout_seconds
+        self._action_signer = ApprovalActionSigner(action_signing_key)
 
     async def send(self, line_user_id: str, activity: Activity) -> None:
         labels = [
@@ -55,11 +60,16 @@ class LineConditionPromptSender:
                     "type": "postback",
                     "label": label,
                     "data": (
-                        f"action=proposal&proposal_id={proposal.id}&decision={decision}"
+                        self._action_signer.create(
+                            proposal.id,
+                            line_user_id,
+                            decision,
+                            int(proposal.expires_at.timestamp()),
+                        )
                     ),
                 },
             }
-            for label, decision in (("承認", "approve"), ("却下", "reject"))
+            for label, decision in (("投稿", "approve"), ("投稿しない", "reject"))
         ]
         summary = (
             f"明日の提案: {proposal.title}"

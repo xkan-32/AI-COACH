@@ -113,3 +113,25 @@ async def test_firestore_draft_restores_condition_level_enum() -> None:
 
     assert isinstance(draft, ConditionDraft)
     assert draft.level.value == "pain"
+
+
+async def test_expired_condition_draft_rejects_late_reply() -> None:
+    workflow, drafts, _, _ = await workflow_fixture()
+    await workflow.handle_postback(
+        "line-1", "action=condition&activity_id=activity-1&level=discomfort"
+    )
+    draft = await drafts.get("line-1")
+    await drafts.save(
+        ConditionDraft(
+            activity_id=draft.activity_id,
+            athlete_id=draft.athlete_id,
+            line_user_id=draft.line_user_id,
+            level=draft.level,
+            expires_at=datetime(2026, 8, 31, tzinfo=UTC),
+        )
+    )
+
+    with pytest.raises(InvalidConditionAction, match="有効期限"):
+        await workflow.handle_text("line-1", "右膝")
+
+    assert await drafts.get("line-1") is None

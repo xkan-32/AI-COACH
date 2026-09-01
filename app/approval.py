@@ -1,4 +1,6 @@
+import logging
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import Literal, Protocol
 
 from app.domain.models import ApprovalStatus, WorkoutProposal
@@ -29,6 +31,10 @@ class ProposalOwnerMismatch(ValueError):
     pass
 
 
+class ProposalExpired(ValueError):
+    pass
+
+
 class InMemoryProposalStateStore:
     def __init__(self) -> None:
         self.items: dict[str, tuple[WorkoutProposal, str, str]] = {}
@@ -43,6 +49,8 @@ class InMemoryProposalStateStore:
         proposal, owner, state = item
         if owner != task.line_user_id:
             raise ProposalOwnerMismatch("Proposal does not belong to this LINE user")
+        if proposal.expires_at <= datetime.now(UTC):
+            raise ProposalExpired("Proposal approval has expired")
         if state != "pending":
             return None
         next_state = "applying" if task.decision == "approve" else "rejected"
@@ -91,6 +99,9 @@ class FirestoreProposalStateStore:
                 raise ProposalOwnerMismatch(
                     "Proposal does not belong to this LINE user"
                 )
+            proposal = WorkoutProposal.model_validate(values)
+            if proposal.expires_at <= datetime.now(UTC):
+                raise ProposalExpired("Proposal approval has expired")
             if values["workflow_state"] != "pending":
                 return None
             next_state = "applying" if task.decision == "approve" else "rejected"
@@ -98,7 +109,7 @@ class FirestoreProposalStateStore:
             if task.decision == "reject":
                 update["status"] = ApprovalStatus.REJECTED.value
             txn.update(document, update)
-            return WorkoutProposal.model_validate(values)
+            return proposal
 
         return await claim_once(transaction)
 
@@ -130,6 +141,9 @@ class CompositeProposalStore:
         await self._analytics.save(proposal, line_user_id)
 
 
+logger = logging.getLogger(__name__)
+
+
 class ApprovalService:
     def __init__(
         self,
@@ -144,6 +158,11 @@ class ApprovalService:
         self._strava = strava
 
     async def decide(self, task: ProposalDecisionTask) -> str:
+        logger.info(
+            "proposal_decision_started proposal_id=%s decision=%s",
+            task.proposal_id,
+            task.decision,
+        )
         proposal = await self._states.claim(task)
         if proposal is None:
             return "duplicate"
@@ -170,6 +189,11 @@ class ApprovalService:
                 )
             await self._states.complete(proposal.id)
             await self._analytics.update_status(proposal.id, ApprovalStatus.APPROVED)
+            logger.info(
+                "proposal_decision_completed proposal_id=%s decision=approve activity_id=%s",
+                proposal.id,
+                proposal.source_activity_id,
+            )
             return "approved"
         except Exception:
             await self._states.release(proposal.id)
