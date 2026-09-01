@@ -17,6 +17,26 @@ class ApprovalStatus(StrEnum):
     REJECTED = "rejected"
 
 
+class GoalPriority(StrEnum):
+    PRIMARY = "primary"
+    SECONDARY = "secondary"
+
+
+class GoalStatus(StrEnum):
+    ACTIVE = "active"
+    COMPLETED = "completed"
+    PAUSED = "paused"
+
+
+class Goal(BaseModel):
+    id: str
+    goal_type: str = Field(min_length=1, max_length=50)
+    target: str = Field(min_length=1, max_length=200)
+    target_date: date | None = None
+    priority: GoalPriority
+    status: GoalStatus = GoalStatus.ACTIVE
+
+
 class Activity(BaseModel):
     id: str
     athlete_id: str
@@ -36,6 +56,13 @@ class ConditionReport(BaseModel):
     worsened_during_activity: bool | None = None
     comment: str = ""
     reported_at: datetime
+
+
+class CoachingContext(BaseModel):
+    goals: list[Goal] = Field(default_factory=list)
+    training_resources: list[str] = Field(default_factory=list)
+    recent_activities: list[Activity] = Field(default_factory=list)
+    recent_conditions: list[ConditionReport] = Field(default_factory=list)
 
 
 class WorkoutProposal(BaseModel):

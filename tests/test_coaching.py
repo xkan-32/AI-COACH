@@ -55,7 +55,7 @@ def test_discomfort_caps_duration_and_intensity() -> None:
 
 async def test_coaching_service_saves_then_sends_safe_proposal() -> None:
     class UnsafeGenerator:
-        async def generate(self, activity, report):
+        async def generate(self, activity, report, context):
             return unsafe_output()
 
     proposals = InMemoryProposalStore()
