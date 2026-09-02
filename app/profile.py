@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import uuid
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, date, datetime, timedelta
@@ -38,6 +39,14 @@ ENVIRONMENT_ALIASES = {
     "ルームバイク": "インドアバイク",
     "エアロバイク": "インドアバイク",
     "フィットネスバイク": "インドアバイク",
+}
+GOAL_TYPES = ("大会", "タイム・距離", "運動習慣", "体力づくり", "その他")
+GOAL_TARGET_EXAMPLES = {
+    "大会": "例: 東京マラソンを完走する",
+    "タイム・距離": "例: 10kmを60分以内で走る",
+    "運動習慣": "例: 週3回運動する",
+    "体力づくり": "例: 疲れにくい身体をつくる",
+    "その他": "達成したい状態を具体的に入力してください。",
 }
 
 
@@ -584,6 +593,20 @@ class ProfileWorkflow:
             await self._continue(
                 user, values.get("value", ""), await self._active_draft(user)
             )
+            await self._messenger.send_quick_reply(
+                user,
+                "目標の種類を選んでください。",
+                [
+                    (name, profile_action("goals", "type", value=name))
+                    for name in GOAL_TYPES
+                ]
+                + [("キャンセル", profile_action("goals", "cancel"))],
+            )
+            return
+        if operation == "type":
+            await self._continue(
+                user, values.get("value", ""), await self._active_draft(user)
+            )
             return
         if operation in {"change", "deactivate"}:
             await self._drafts.delete(user)
@@ -621,22 +644,17 @@ class ProfileWorkflow:
             await self._show_environment_menu(user)
             return
         if operation == "add":
-            await self._messenger.send_quick_reply(
-                user,
-                "追加する種類を選んでください。",
-                [
-                    (
-                        "場所・種目",
-                        profile_action("environments", "group", value="activity_place"),
-                    ),
-                    (
-                        "器具",
-                        profile_action("environments", "group", value="equipment"),
-                    ),
-                    ("その他", profile_action("environments", "other")),
-                    ("キャンセル", profile_action("environments", "cancel")),
-                ],
+            await self._drafts.delete(user)
+            await self._drafts.save(
+                ProfileDraft(
+                    user,
+                    str(uuid.uuid4()),
+                    "environment_batch",
+                    "multi_select",
+                    {"selected": "[]"},
+                )
             )
+            await self._show_environment_groups(user)
             return
         if operation == "group":
             group = values.get("value")
@@ -647,24 +665,54 @@ class ProfileWorkflow:
             )
             if not presets:
                 raise ProfileCommandError("運動環境の種類を確認できませんでした。")
-            await self._drafts.delete(user)
-            await self.handle_text(user, "運動環境追加")
+            draft = await self._active_draft(user)
+            selected = self._selected_environments(draft)
             await self._messenger.send_quick_reply(
                 user,
-                "追加する項目を選んでください。",
+                f"項目を選んでください（選択中 {len(selected)}件）。再タップで解除できます。",
                 [
-                    (name, profile_action("environments", "select", value=name))
+                    (
+                        ("✓ " if name in selected else "") + name,
+                        profile_action(
+                            "environments", "toggle", value=name, group=group
+                        ),
+                    )
                     for name in presets
                 ]
-                + [("キャンセル", profile_action("environments", "cancel"))],
+                + [
+                    ("種類選択へ戻る", profile_action("environments", "groups")),
+                    ("選択完了", profile_action("environments", "complete")),
+                    ("キャンセル", profile_action("environments", "cancel")),
+                ],
+            )
+            return
+        if operation == "groups":
+            await self._show_environment_groups(user)
+            return
+        if operation == "toggle":
+            await self._toggle_environment(user, values.get("value", ""))
+            await self._handle_environment_postback(
+                user, "group", {"value": values.get("group", "")}
             )
             return
         if operation == "other":
-            await self._drafts.delete(user)
-            await self.handle_text(user, "運動環境追加")
-            await self._messenger.send_text(
-                user, "その他の運動環境を入力してください。"
+            draft = await self._active_draft(user)
+            await self._drafts.save(
+                ProfileDraft(
+                    user,
+                    draft.operation_id,
+                    draft.action,
+                    "multi_other",
+                    draft.values,
+                    draft.expires_at,
+                )
             )
+            await self._messenger.send_text(
+                user, "その他の運動環境を入力してください。入力後も選択を続けられます。"
+            )
+            return
+        if operation == "complete":
+            await self._complete_environment_batch(user)
             return
         if operation in {"change", "deactivate"}:
             await self._drafts.delete(user)
@@ -695,6 +743,89 @@ class ProfileWorkflow:
             return
         raise ProfileCommandError("選択された運動環境操作を確認できませんでした。")
 
+    def _selected_environments(self, draft: ProfileDraft) -> list[str]:
+        try:
+            selected = json.loads(draft.values.get("selected", "[]"))
+        except json.JSONDecodeError as exc:
+            raise ProfileCommandError(
+                "選択状態を確認できません。やり直してください。"
+            ) from exc
+        return [str(item) for item in selected] if isinstance(selected, list) else []
+
+    async def _show_environment_groups(self, user: str) -> None:
+        draft = await self._active_draft(user)
+        if draft.action != "environment_batch":
+            raise ProfileCommandError("複数選択をメニューからやり直してください。")
+        selected = self._selected_environments(draft)
+        await self._messenger.send_quick_reply(
+            user,
+            f"種類を選んでください（選択中 {len(selected)}件）。",
+            [
+                (
+                    "場所・種目",
+                    profile_action("environments", "group", value="activity_place"),
+                ),
+                (
+                    "器具",
+                    profile_action("environments", "group", value="equipment"),
+                ),
+                ("その他", profile_action("environments", "other")),
+                ("選択完了", profile_action("environments", "complete")),
+                ("キャンセル", profile_action("environments", "cancel")),
+            ],
+        )
+
+    async def _toggle_environment(self, user: str, value: str) -> None:
+        draft = await self._active_draft(user)
+        item = normalize_environment(value)
+        selected = self._selected_environments(draft)
+        if item.display_name in selected:
+            selected.remove(item.display_name)
+        else:
+            selected.append(item.display_name)
+        if len(selected) > MAX_ITEMS:
+            raise ProfileCommandError(f"運動環境は{MAX_ITEMS}件まで選択できます。")
+        await self._drafts.save(
+            ProfileDraft(
+                user,
+                draft.operation_id,
+                draft.action,
+                "multi_select",
+                {"selected": json.dumps(selected, ensure_ascii=False)},
+                draft.expires_at,
+            )
+        )
+
+    async def _complete_environment_batch(self, user: str) -> None:
+        draft = await self._active_draft(user)
+        selected = self._selected_environments(draft)
+        if not selected:
+            raise ProfileCommandError("運動環境を1件以上選択してください。")
+        existing = await self._resources.list(user)
+        existing_keys = {environment_key(item) for item in existing}
+        additions: list[TrainingEnvironment] = []
+        for value in selected:
+            item = normalize_environment(value)
+            if environment_key(item) not in existing_keys:
+                additions.append(item)
+                existing_keys.add(environment_key(item))
+        if len(existing) + len(additions) > MAX_ITEMS:
+            raise ProfileCommandError(f"有効な運動環境は{MAX_ITEMS}件までです。")
+        for item in additions:
+            item.id = str(
+                uuid.uuid5(
+                    uuid.NAMESPACE_URL,
+                    f"{draft.operation_id}:{environment_key(item)}",
+                )
+            )
+            await self._resources.save(user, item)
+        await self._drafts.delete(user)
+        skipped = len(selected) - len(additions)
+        suffix = f"（登録済み{skipped}件は変更なし）" if skipped else ""
+        await self._messenger.send_text(
+            user, f"運動環境を{len(additions)}件追加しました。{suffix}"
+        )
+
     async def _active_draft(self, user: str) -> ProfileDraft:
         draft = await self._drafts.get(user)
         if draft is None or draft.expires_at <= self._clock():
@@ -717,6 +848,12 @@ class ProfileWorkflow:
                 raise ProfileCommandError(
                     "入力の有効期限が切れました。メニューから再開してください。"
                 )
+            if draft.action == "environment_batch" and draft.step == "multi_other":
+                if not value:
+                    raise ProfileCommandError("その他の運動環境を入力してください。")
+                await self._toggle_environment(line_user_id, value)
+                await self._show_environment_groups(line_user_id)
+                return True
             await self._continue(line_user_id, value, draft)
             return True
         if value == "目標":
@@ -776,8 +913,8 @@ class ProfileWorkflow:
         values = dict(draft.values)
         if draft.action == "goal_add":
             steps = {
-                "priority": ("type", "目標の種別を入力してください。"),
-                "type": ("target", "目標の内容を入力してください。"),
+                "priority": ("type", "目標の種類を選ぶか入力してください。"),
+                "type": ("target", ""),
                 "target": (
                     "date",
                     "期限をYYYY-MM-DDまたは「なし」で入力してください。",
@@ -793,6 +930,13 @@ class ProfileWorkflow:
             if draft.step != "date":
                 values[draft.step] = value
                 next_step, prompt = steps[draft.step]
+                if draft.step == "type":
+                    prompt = (
+                        "達成したい内容を入力してください。\n"
+                        + GOAL_TARGET_EXAMPLES.get(
+                            value, GOAL_TARGET_EXAMPLES["その他"]
+                        )
+                    )
                 await self._drafts.save(
                     ProfileDraft(
                         user,

@@ -151,9 +151,32 @@ async def test_rich_menu_uses_tappable_profile_actions() -> None:
         if label == "インドアバイク"
     )
     await workflow.handle_postback("line-1", indoor_action)
+    back_action = next(
+        action
+        for label, action in messenger.quick_replies[-1][2]
+        if label == "種類選択へ戻る"
+    )
+    await workflow.handle_postback("line-1", back_action)
+    equipment_action = next(
+        action for label, action in messenger.quick_replies[-1][2] if label == "器具"
+    )
+    await workflow.handle_postback("line-1", equipment_action)
+    dumbbell_action = next(
+        action
+        for label, action in messenger.quick_replies[-1][2]
+        if label == "ダンベル"
+    )
+    await workflow.handle_postback("line-1", dumbbell_action)
+    complete_action = next(
+        action
+        for label, action in messenger.quick_replies[-1][2]
+        if label == "選択完了"
+    )
+    await workflow.handle_postback("line-1", complete_action)
 
     assert [item.display_name for item in await resources.list("line-1")] == [
-        "インドアバイク"
+        "インドアバイク",
+        "ダンベル",
     ]
     assert await drafts.get("line-1") is None
 
@@ -172,6 +195,55 @@ async def test_goal_priority_can_be_selected_without_typing_command() -> None:
     primary_action = messenger.quick_replies[-1][2][0][1]
     await workflow.handle_postback("line-1", primary_action)
     assert (await drafts.get("line-1")).step == "type"
+    assert [label for label, _ in messenger.quick_replies[-1][2]][:5] == [
+        "大会",
+        "タイム・距離",
+        "運動習慣",
+        "体力づくり",
+        "その他",
+    ]
+    habit_action = next(
+        action
+        for label, action in messenger.quick_replies[-1][2]
+        if label == "運動習慣"
+    )
+    await workflow.handle_postback("line-1", habit_action)
+    assert (await drafts.get("line-1")).step == "target"
+    assert "週3回運動する" in messenger.texts[-1][1]
+
+
+async def test_environment_multi_select_can_toggle_before_completion() -> None:
+    goals, resources, drafts = (
+        InMemoryGoalStore(),
+        InMemoryTrainingResourceStore(),
+        InMemoryProfileDraftStore(),
+    )
+    messenger = InMemoryConditionPromptSender()
+    workflow = ProfileWorkflow(goals, resources, drafts, messenger)
+    await workflow.handle_postback(
+        "line-1", "action=profile&section=environments&operation=add"
+    )
+    await workflow.handle_postback(
+        "line-1",
+        "action=profile&section=environments&operation=group&value=equipment",
+    )
+    dumbbell_action = next(
+        action
+        for label, action in messenger.quick_replies[-1][2]
+        if label == "ダンベル"
+    )
+    await workflow.handle_postback("line-1", dumbbell_action)
+    selected_action = next(
+        action
+        for label, action in messenger.quick_replies[-1][2]
+        if label == "✓ ダンベル"
+    )
+    await workflow.handle_postback("line-1", selected_action)
+    with pytest.raises(ProfileCommandError, match="1件以上"):
+        await workflow.handle_postback(
+            "line-1", "action=profile&section=environments&operation=complete"
+        )
+    assert await resources.list("line-1") == []
 
 
 async def test_expired_draft_is_deleted() -> None:
