@@ -52,6 +52,9 @@ class ConditionReportStore(Protocol):
 
 class FollowUpMessenger(Protocol):
     async def send_text(self, line_user_id: str, text: str) -> None: ...
+    async def send_quick_reply(
+        self, line_user_id: str, text: str, choices: list[tuple[str, str]]
+    ) -> None: ...
     async def send_weekly_plan_link(self, line_user_id: str, url: str) -> None: ...
 
 

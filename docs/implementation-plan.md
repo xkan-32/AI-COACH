@@ -91,6 +91,15 @@ Exit: 自動Schedulerと通知を有効にせず、安全な週間draftを手動
 
 Exit: LINE所有者だけが週間案を確認・決定でき、未承認・却下・別案依頼ではactive計画が変わらない。
 
+### Phase 2.9 - LINE manual activity（実装済み）
+
+- リッチメニュー「運動を記録」から会話で実施記録を登録
+- 共通Activity境界へ`source_type=line_manual`で保存し、任意の当日PlannedWorkoutと運動環境を紐付ける
+- 途中保存、cancel、24時間TTL、operation IDによる冪等保存
+- 保存後に既存の体調確認へ接続。Stravaは更新しない
+
+Exit: Strava未連携でも運動記録を保存でき、明示承認なしにStravaは変わらない。
+
 ### Phase 3 - Approval and Strava update（実装済み）
 
 - Send proposal with approve/reject actions and an expiring signed action token
@@ -111,7 +120,7 @@ Exit: only one approved proposal is appended, retries do not duplicate text.
 - Cloud Tasksのretry設定とOIDC付きworker呼び出し
 - TerraformとGitHub ActionsによるCI/CD
 - LINEリッチメニューの冪等同期
-- OAuth session、体調draft、Activity context、プロフィール一時データのFirestore TTL
+- OAuth session、体調draft、Activity context、プロフィール一時データ、手動Activity draftのFirestore TTL
 
 残課題:
 

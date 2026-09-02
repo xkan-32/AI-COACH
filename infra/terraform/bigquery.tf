@@ -26,6 +26,14 @@ resource "google_bigquery_table" "activities" {
     { name = "suffer_score", type = "FLOAT", mode = "NULLABLE" },
     { name = "calories", type = "FLOAT", mode = "NULLABLE" },
     { name = "ingested_at", type = "TIMESTAMP", mode = "NULLABLE" },
+    { name = "user_id", type = "STRING", mode = "NULLABLE" },
+    { name = "source_type", type = "STRING", mode = "NULLABLE" },
+    { name = "source_activity_id", type = "STRING", mode = "NULLABLE" },
+    { name = "planned_workout_id", type = "STRING", mode = "NULLABLE" },
+    { name = "perceived_intensity", type = "STRING", mode = "NULLABLE" },
+    { name = "environment_ids", type = "STRING", mode = "REPEATED" },
+    { name = "completion_status", type = "STRING", mode = "NULLABLE" },
+    { name = "details", type = "STRING", mode = "NULLABLE" },
   ])
 }
 

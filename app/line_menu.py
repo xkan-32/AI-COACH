@@ -58,9 +58,11 @@ class MenuActionRouter:
         self,
         messenger: MenuMessenger,
         on_progress_requested: Callable[[str], Awaitable[None]] | None = None,
+        on_manual_activity_requested: Callable[[str], Awaitable[None]] | None = None,
     ) -> None:
         self._messenger = messenger
         self._on_progress_requested = on_progress_requested
+        self._on_manual_activity_requested = on_manual_activity_requested
 
     async def handle(self, line_user_id: str, data: str) -> bool:
         values = _single_value_query(data)
@@ -73,6 +75,12 @@ class MenuActionRouter:
         target = values.get("target", "")
         if target == "progress" and self._on_progress_requested is not None:
             await self._on_progress_requested(line_user_id)
+            return True
+        if (
+            target == "manual_activity"
+            and self._on_manual_activity_requested is not None
+        ):
+            await self._on_manual_activity_requested(line_user_id)
             return True
         message = MENU_MESSAGES.get(target)
         if message is None:

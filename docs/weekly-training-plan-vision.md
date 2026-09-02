@@ -486,6 +486,8 @@ AI実行前に制約を作り、AI出力後にも同じ制約で検証する。�
 
 ### MA-01 共通手動Activity
 
+実装済み。LINE会話登録、途中保存、TTL、冪等保存、Strava非更新は`docs/next-session-ma-01.md`を参照する。
+
 - ウェイト、自宅トレーニング等を共通Activity境界へ登録する。
 - PlannedWorkoutの明示選択、cancel、TTL、Task再送冪等性を持たせる。
 
