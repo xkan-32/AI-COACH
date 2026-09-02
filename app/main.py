@@ -5,7 +5,7 @@ from urllib.parse import parse_qs, quote
 
 from fastapi import FastAPI, HTTPException, Query, Request, Response
 from fastapi.responses import FileResponse, RedirectResponse
-from pydantic import BaseModel, Field, ValidationError, model_validator
+from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
 
 from app.approval import (
     ApprovalService,
@@ -28,6 +28,8 @@ from app.ingestion import ActivityIngestionService, UnknownAthleteToken
 from app.line_menu import MenuActionError, MenuActionRouter
 from app.oauth import InvalidOAuthState, OAuthStateSigner, strava_authorization_url
 from app.oauth_service import StravaOAuthService, UnknownOAuthSession
+from app.plan_generation import WeeklyPlanGenerationService
+from app.planning import TrainingSettingsService
 from app.profile import (
     ACTIVITY_PLACES,
     ENVIRONMENT_ALIASES,
@@ -115,6 +117,26 @@ class ProfileSettingsInput(BaseModel):
                 raise ValueError("同じ運動環境が重複しています。")
             keys.add(key)
         return self
+
+
+class WeeklyPlanGenerationTask(BaseModel):
+    user_id: str = Field(min_length=1, max_length=128)
+    line_user_id: str = Field(min_length=1, max_length=128)
+    week_start: date
+    plan_version: int = Field(ge=1)
+    generation_reason: str = Field(min_length=1, max_length=80)
+    input_revision: str = Field(min_length=1, max_length=128)
+    operation_id: str = Field(
+        min_length=1, max_length=128, pattern=r"^[A-Za-z0-9_.:-]+$"
+    )
+    requested_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+
+    @field_validator("requested_at")
+    @classmethod
+    def requested_at_must_be_timezone_aware(cls, value: datetime) -> datetime:
+        if value.tzinfo is None or value.utcoffset() is None:
+            raise ValueError("requested_at must be timezone-aware")
+        return value.astimezone(UTC)
 
 
 def _settings_signer() -> SettingsTokenSigner:
@@ -410,6 +432,59 @@ async def decide_proposal_task(
         task.line_user_id, messages.get(result, "処理が完了しました。")
     )
     return {"status": result}
+
+
+@app.post("/tasks/plans/generate", status_code=202)
+async def generate_weekly_plan_task(
+    request: Request, task: WeeklyPlanGenerationTask
+) -> dict[str, object]:
+    settings = get_settings()
+    await verify_cloud_task_request(request, settings)
+    event_key = (
+        f"{task.user_id}:{task.week_start.isoformat()}:"
+        f"{task.generation_reason}:{task.input_revision}"
+    )
+    if not await runtime.events.reserve("weekly_plan_generation", event_key):
+        return {"status": "duplicate"}
+    service = WeeklyPlanGenerationService(
+        runtime.weekly_plan_generator,
+        runtime.planning_history,
+        TrainingSettingsService(
+            runtime.training_settings_state,
+            runtime.training_settings_history,
+        ),
+        runtime.goals,
+        runtime.training_resources,
+        runtime.activities,
+        runtime.condition_reports,
+        settings.vertex_model,
+    )
+    try:
+        result = await service.generate_shadow_plan(
+            user_id=task.user_id,
+            line_user_id=task.line_user_id,
+            week_start=task.week_start,
+            plan_version=task.plan_version,
+            generation_reason=task.generation_reason,
+            input_revision=task.input_revision,
+            operation_id=task.operation_id,
+            now=task.requested_at,
+        )
+    except Exception:
+        await runtime.events.release("weekly_plan_generation", event_key)
+        raise
+    await runtime.events.complete("weekly_plan_generation", event_key)
+    logger.info(
+        "weekly_plan_shadow_generated plan_id=%s user_id=%s week_start=%s "
+        "used_fallback=%s",
+        result.plan_id,
+        task.user_id,
+        task.week_start,
+        result.used_fallback,
+    )
+    result_payload = result.model_dump(mode="json")
+    result_payload["plan_status"] = result_payload.pop("status")
+    return {"status": "completed", **result_payload}
 
 
 @app.get("/oauth/strava/start")

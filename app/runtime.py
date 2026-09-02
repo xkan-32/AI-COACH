@@ -60,6 +60,11 @@ from app.ingestion import (
     InMemoryActivityStore,
 )
 from app.line import InMemoryConditionPromptSender, LineConditionPromptSender
+from app.plan_generation import (
+    LocalWeeklyPlanGenerator,
+    VertexWeeklyPlanGenerator,
+    WeeklyPlanGenerator,
+)
 from app.planning import (
     ActivePlanPointerStore,
     BigQueryPlanningHistoryStore,
@@ -163,6 +168,7 @@ class Runtime:
     active_plan_pointers: ActivePlanPointerStore
     training_settings_state: TrainingSettingsStateStore
     training_settings_history: TrainingSettingsHistoryStore
+    weekly_plan_generator: WeeklyPlanGenerator
     publication_history: PublicationHistoryStore
     publication_states: PublicationApprovalStateStore
     publication_signer: PublicationActionSigner
@@ -213,6 +219,7 @@ def build_runtime(settings: Settings) -> Runtime:
             active_plan_pointers=InMemoryActivePlanPointerStore(),
             training_settings_state=training_settings,
             training_settings_history=training_settings,
+            weekly_plan_generator=LocalWeeklyPlanGenerator(),
             publication_history=InMemoryPublicationHistoryStore(),
             publication_states=InMemoryPublicationApprovalStateStore(),
             publication_signer=PublicationActionSigner(
@@ -318,6 +325,9 @@ def build_runtime(settings: Settings) -> Runtime:
         training_settings_state=FirestoreTrainingSettingsStateStore(firestore_client),
         training_settings_history=BigQueryTrainingSettingsHistoryStore(
             bigquery_client, table_prefix
+        ),
+        weekly_plan_generator=VertexWeeklyPlanGenerator(
+            genai_client, settings.vertex_model
         ),
         publication_history=BigQueryPublicationHistoryStore(
             bigquery_client, table_prefix
