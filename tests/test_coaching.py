@@ -77,6 +77,26 @@ async def test_coaching_service_saves_then_sends_safe_proposal() -> None:
     assert proposal.duration_minutes == 0
     assert proposals.items[proposal.id] == proposal
     assert sender.proposals == [("line-user", proposal)]
+    assert sender.proposal_publish_flags == [True]
+
+
+async def test_manual_activity_proposal_is_not_offered_for_strava() -> None:
+    from app.domain.models import ActivitySource
+
+    class SafeGenerator:
+        async def generate(self, activity, report, context):
+            return unsafe_output()
+
+    proposals = InMemoryProposalStore()
+    sender = InMemoryConditionPromptSender()
+    service = CoachingService(SafeGenerator(), proposals, sender)
+    item = activity()
+    item.source_type = ActivitySource.LINE_MANUAL
+    proposal = await service.create_proposal(
+        item, report(ConditionLevel.GOOD), "line-user"
+    )
+    assert sender.proposals == [("line-user", proposal)]
+    assert sender.proposal_publish_flags == [False]
 
 
 def test_coaching_input_contains_metrics_but_no_raw_location_data() -> None:

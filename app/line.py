@@ -113,7 +113,28 @@ class LineConditionPromptSender:
             },
         )
 
-    async def send_proposal(self, line_user_id: str, proposal: WorkoutProposal) -> None:
+    async def send_proposal(
+        self,
+        line_user_id: str,
+        proposal: WorkoutProposal,
+        *,
+        publish_to_strava: bool = True,
+    ) -> None:
+        summary = (
+            f"明日の提案: {proposal.title}"
+            f"（{proposal.duration_minutes}分・{proposal.intensity}）\n"
+            f"{proposal.rationale}"
+        )
+        if not publish_to_strava:
+            await self._push(
+                line_user_id,
+                {
+                    "type": "text",
+                    "text": summary + "\n\nこの提案はアプリ内の記録です。"
+                    "Stravaへは投稿しません。",
+                },
+            )
+            return
         items = [
             {
                 "type": "action",
@@ -133,11 +154,6 @@ class LineConditionPromptSender:
             }
             for label, decision in (("投稿", "approve"), ("投稿しない", "reject"))
         ]
-        summary = (
-            f"明日の提案: {proposal.title}"
-            f"（{proposal.duration_minutes}分・{proposal.intensity}）\n"
-            f"{proposal.rationale}"
-        )
         await self._push_many(
             line_user_id,
             [
@@ -185,6 +201,7 @@ class InMemoryConditionPromptSender:
         self.sent: list[tuple[str, Activity]] = []
         self.texts: list[tuple[str, str]] = []
         self.proposals: list[tuple[str, WorkoutProposal]] = []
+        self.proposal_publish_flags: list[bool] = []
         self.quick_replies: list[tuple[str, str, list[tuple[str, str]]]] = []
         self.settings_links: list[tuple[str, str]] = []
         self.weekly_plan_links: list[tuple[str, str]] = []
@@ -206,5 +223,12 @@ class InMemoryConditionPromptSender:
     async def send_weekly_plan_link(self, line_user_id: str, url: str) -> None:
         self.weekly_plan_links.append((line_user_id, url))
 
-    async def send_proposal(self, line_user_id: str, proposal: WorkoutProposal) -> None:
+    async def send_proposal(
+        self,
+        line_user_id: str,
+        proposal: WorkoutProposal,
+        *,
+        publish_to_strava: bool = True,
+    ) -> None:
         self.proposals.append((line_user_id, proposal))
+        self.proposal_publish_flags.append(publish_to_strava)

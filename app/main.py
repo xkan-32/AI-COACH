@@ -638,6 +638,7 @@ async def decide_proposal_task(
         runtime.proposal_analytics,
         runtime.tokens,
         StravaOAuthClient(settings.strava_client_id, settings.strava_client_secret),
+        activities=runtime.activities,
     )
     try:
         result = await service.decide(task)
@@ -647,6 +648,11 @@ async def decide_proposal_task(
         raise HTTPException(status_code=410, detail=str(exc)) from exc
     messages = {
         "approved": "Stravaへの投稿が完了しました。",
+        "recorded": "提案を記録しました。Stravaへは投稿していません。",
+        "missing_strava_link": (
+            "Strava連携がないため投稿できません。"
+            "連携後に最新のメッセージから操作してください。"
+        ),
         "rejected": "この提案は投稿しませんでした。",
         "duplicate": "この提案はすでに処理済みです。",
     }
