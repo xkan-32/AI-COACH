@@ -17,6 +17,7 @@ from app.config import get_settings
 from app.domain.events import StravaWebhookEvent
 from app.domain.models import CoachingContext
 from app.ingestion import ActivityIngestionService, UnknownAthleteToken
+from app.line_menu import MenuActionError, MenuActionRouter
 from app.oauth import InvalidOAuthState, OAuthStateSigner, strava_authorization_url
 from app.oauth_service import StravaOAuthService, UnknownOAuthSession
 from app.profile import ProfileCommandError, ProfileCommandService
@@ -235,11 +236,14 @@ async def process_line_event(event: dict) -> None:
     profile_commands = ProfileCommandService(
         runtime.goals, runtime.training_resources, runtime.messenger
     )
+    menu_actions = MenuActionRouter(runtime.messenger)
     event_type = event.get("type")
     line_user_id = event.get("source", {}).get("userId", "")
     try:
         if event_type == "postback":
             data = event.get("postback", {}).get("data", "")
+            if await menu_actions.handle(line_user_id, data):
+                return
             values = {key: value[0] for key, value in parse_qs(data).items() if value}
             if values.get("action") == "proposal":
                 decision = values.get("decision", "")
@@ -288,7 +292,7 @@ async def process_line_event(event: dict) -> None:
             line_user_id,
             "この操作は期限切れか無効です。最新のメッセージから操作してください。",
         )
-    except (InvalidConditionAction, ProfileCommandError) as exc:
+    except (InvalidConditionAction, MenuActionError, ProfileCommandError) as exc:
         await runtime.messenger.send_text(line_user_id, str(exc))
 
 

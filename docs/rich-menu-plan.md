@@ -13,9 +13,9 @@
 | AI翌日提案 | 実装済み | 提案とButtons Templateを送信 |
 | Strava投稿承認 | 実装済み | 署名・期限付きの投稿／投稿しない |
 | 目標・運動環境 | 一部実装済み | テキストコマンドで登録・確認 |
-| リッチメニュー画像・領域 | 未実装 | アセットと座標定義なし |
-| Rich Menu API同期 | 未実装 | 作成、画像設定、既定化、削除なし |
-| メニューaction処理 | 未実装 | 専用postback routerなし |
+| リッチメニュー画像・領域 | RM-01実装済み | 2500×1686 PNG、編集用SVG、6領域JSON |
+| Rich Menu API同期 | RM-02実装済み | content hashによる冪等同期、dry-run、失敗時cleanup |
+| メニューaction処理 | RM-03実装済み | Cloud Tasks worker内で6領域を案内へrouting |
 | CI/CD・IaC連携 | 未実装 | デプロイ時の同期処理なし |
 | 状態別メニュー | 未実装 | 未連携／連携済みの切替なし |
 
@@ -53,6 +53,41 @@ action=menu&version=1&target=settings
 - 更新時は新規作成、画像設定、既定切替、旧メニュー削除の順に行う。
 - GitHub ActionsではCloud RunとTerraform apply成功後に同期する。
 - リッチメニューは入口であり、Strava更新の明示承認を代替しない。
+
+## RM-01〜RM-03 実装仕様
+
+- 画像サイズはLINEのlarge rich menuに合わせて2500×1686pxとする。
+- 列境界は`x=833`、`x=1666`、行境界は`y=843`とし、端数は右列へ割り当てる。
+- `assets/line-rich-menu/rich-menu-v1.source.svg`を編集用ソース、同名PNGを配布画像とする。
+- `config/line-rich-menu/rich-menu-v1.json`を領域・actionの正本とする。
+- 同期時の管理名はJSONとPNGのSHA-256から決定する。同じ内容なら既存menuを再利用する。
+- 更新時は新menuの作成と画像uploadを完了してから既定化し、既定化後に本実装が管理する旧版だけを削除する。
+- 画像upload失敗時は作成途中のmenuを削除する。削除にも失敗した場合はエラーとして再試行対象にする。
+- 他用途のrich menuは名前prefixが異なるため削除しない。
+
+同期予定の確認（LINE APIへの読み取りは行うが、変更は行わない）:
+
+```bash
+export LINE_CHANNEL_ACCESS_TOKEN="$(安全な秘密ストアから取得)"
+python3 scripts/sync-line-rich-menu.py --dry-run
+```
+
+実同期は`--dry-run`を外す。本番tokenをコマンドライン引数、設定JSON、ログ、Terraform変数へ渡してはならない。
+RM-04のGitHub Actions統合および本番アカウントへの同期は本セッションの対象外である。
+
+### メニュー押下時の動作
+
+| target | RM-03での応答 |
+|---|---|
+| `today_proposal` | アクティビティ後の体調記録と最新提案メッセージを案内 |
+| `condition` | 既存のアクティビティ後体調確認を案内 |
+| `manual_activity` | 準備中を案内し、Stravaを直接更新しないことを明示 |
+| `goals` | `目標確認`、`目標登録`コマンドを案内 |
+| `progress` | 準備中と既存フィードバックを案内 |
+| `settings` | `Strava連携`、`運動環境確認`コマンドを案内 |
+
+メニューpostbackはLINE Webhookで署名検証・event重複排除後に既存Cloud Tasksへenqueueされ、workerで処理される。
+提案承認postbackの署名、期限、所有者検証経路には入らず、メニュー押下だけでStrava更新Taskを作成しない。
 
 推奨構成:
 
