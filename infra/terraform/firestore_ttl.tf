@@ -63,3 +63,25 @@ resource "google_firestore_field" "publication_approval_states_ttl" {
 
   depends_on = [google_project_service.required]
 }
+
+resource "google_firestore_field" "workout_preferences_ttl" {
+  project    = var.project_id
+  database   = google_firestore_database.state.name
+  collection = "workout_preferences"
+  field      = "expires_at"
+
+  ttl_config {}
+
+  depends_on = [google_project_service.required]
+}
+
+resource "google_firestore_field" "dated_workout_requests_ttl" {
+  project    = var.project_id
+  database   = google_firestore_database.state.name
+  collection = "dated_workout_requests"
+  field      = "expires_at"
+
+  ttl_config {}
+
+  depends_on = [google_project_service.required]
+}

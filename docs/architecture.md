@@ -72,6 +72,16 @@ BigQuery is used for immutable history and analysis. Firestore is used for OAuth
 - BigQueryはdraftとdecisionの不変履歴、Firestoreはpending/approved/rejected/expiredの競合制御だけを保持する。
 - Foundationにはprovider adapter呼び出しを含めない。将来の外部公開処理も、有効なLINE明示承認decisionがなければ実行できない。
 
+## PL-01A 週間計画設定・状態基盤
+
+- 計画所有者はapp `user_id`とし、Strava `athlete_id`はnullableなprovider linkとする。旧plan rowは読み取り時だけ`user_id=athlete_id`として互換化し、履歴を更新しない。
+- `UserTrainingProfile`はIANA timezoneと月曜週開始を保持する。ローカル日付の判定時だけtimezone変換し、保存timestampはUTCとする。timezone変更で過去計画の日付を変換しない。
+- 稼働可能時間は不変な`WeeklyAvailabilityVersion`と複数slotで表現し、Firestore transactionでactive pointerをCAS更新する。日跨ぎslotは拒否して2日に分割し、固定休養日と通常slotの同居を禁止する。
+- explicit/inferred preferenceを分離し、inferredにはconfidence、evidence、確認状態を必須とする。同じ種別にexplicitがある場合はinferredを計画入力から除外する。
+- BigQueryには設定version、plan lifecycle event、execution state、Safety Gate、Readinessをappend-onlyで保存する。Firestoreにはprofile現在値、availability active pointer、期限付きpreferences/dated requests、承認済みplan pointerを置く。
+- `PlannedWorkout`は`planned`固定の不変な処方recordである。実施結果は`WorkoutExecutionState`、照合は`WorkoutReconciliation`、評価は`WorkoutReview`へ分離する。
+- 新規active化経路は`pending_approval -> active` eventを必須とする。Safety Gateの`blocked`は変更案の拒否で解除しない。
+
 ## AC-01 詳細Activity・負荷解析
 
 - Run、Walk、Ride系Activityではdetail、laps、streamsをCloud Tasks worker内で取得する。非対応種目はActivity summaryから安全に処理する。

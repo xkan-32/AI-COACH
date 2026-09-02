@@ -129,10 +129,12 @@ resource "google_bigquery_table" "training_plan_versions" {
   clustering = ["athlete_id", "week_start"]
   schema = jsonencode([
     { name = "id", type = "STRING", mode = "REQUIRED" },
-    { name = "athlete_id", type = "STRING", mode = "REQUIRED" },
-    { name = "line_user_id", type = "STRING", mode = "REQUIRED" },
+    { name = "user_id", type = "STRING", mode = "NULLABLE" },
+    { name = "athlete_id", type = "STRING", mode = "NULLABLE" },
+    { name = "line_user_id", type = "STRING", mode = "NULLABLE" },
     { name = "week_start", type = "DATE", mode = "REQUIRED" },
     { name = "version", type = "INTEGER", mode = "REQUIRED" },
+    { name = "status", type = "STRING", mode = "NULLABLE" },
     { name = "goal_snapshot", type = "JSON", mode = "REQUIRED" },
     { name = "change_reason", type = "STRING", mode = "REQUIRED" },
     { name = "supersedes_plan_version_id", type = "STRING", mode = "NULLABLE" },
@@ -156,7 +158,8 @@ resource "google_bigquery_table" "planned_workouts" {
   schema = jsonencode([
     { name = "id", type = "STRING", mode = "REQUIRED" },
     { name = "plan_version_id", type = "STRING", mode = "REQUIRED" },
-    { name = "athlete_id", type = "STRING", mode = "REQUIRED" },
+    { name = "user_id", type = "STRING", mode = "NULLABLE" },
+    { name = "athlete_id", type = "STRING", mode = "NULLABLE" },
     { name = "scheduled_date", type = "DATE", mode = "REQUIRED" },
     { name = "sequence", type = "INTEGER", mode = "REQUIRED" },
     { name = "workout_type", type = "STRING", mode = "REQUIRED" },
@@ -165,6 +168,8 @@ resource "google_bigquery_table" "planned_workouts" {
     { name = "target_intensity", type = "STRING", mode = "REQUIRED" },
     { name = "environment_ids", type = "STRING", mode = "REPEATED" },
     { name = "safety_constraints", type = "STRING", mode = "REPEATED" },
+    { name = "workout_lineage_id", type = "STRING", mode = "NULLABLE" },
+    { name = "supersedes_planned_workout_id", type = "STRING", mode = "NULLABLE" },
     { name = "status", type = "STRING", mode = "REQUIRED" },
     { name = "created_at", type = "TIMESTAMP", mode = "REQUIRED" },
   ])
@@ -183,7 +188,8 @@ resource "google_bigquery_table" "workout_reconciliations" {
     { name = "id", type = "STRING", mode = "REQUIRED" },
     { name = "plan_version_id", type = "STRING", mode = "REQUIRED" },
     { name = "planned_workout_id", type = "STRING", mode = "REQUIRED" },
-    { name = "athlete_id", type = "STRING", mode = "REQUIRED" },
+    { name = "user_id", type = "STRING", mode = "NULLABLE" },
+    { name = "athlete_id", type = "STRING", mode = "NULLABLE" },
     { name = "source_type", type = "STRING", mode = "REQUIRED" },
     { name = "activity_id", type = "STRING", mode = "NULLABLE" },
     { name = "status", type = "STRING", mode = "REQUIRED" },
@@ -210,7 +216,8 @@ resource "google_bigquery_table" "workout_reviews" {
     { name = "plan_version_id", type = "STRING", mode = "REQUIRED" },
     { name = "planned_workout_id", type = "STRING", mode = "REQUIRED" },
     { name = "reconciliation_id", type = "STRING", mode = "NULLABLE" },
-    { name = "athlete_id", type = "STRING", mode = "REQUIRED" },
+    { name = "user_id", type = "STRING", mode = "NULLABLE" },
+    { name = "athlete_id", type = "STRING", mode = "NULLABLE" },
     { name = "achievement_status", type = "STRING", mode = "REQUIRED" },
     { name = "objective_factors", type = "STRING", mode = "REPEATED" },
     { name = "condition_factors", type = "STRING", mode = "REPEATED" },
@@ -220,6 +227,194 @@ resource "google_bigquery_table" "workout_reviews" {
     { name = "ai_model", type = "STRING", mode = "NULLABLE" },
     { name = "prompt_version", type = "STRING", mode = "NULLABLE" },
     { name = "input_snapshot", type = "JSON", mode = "REQUIRED" },
+    { name = "created_at", type = "TIMESTAMP", mode = "REQUIRED" },
+  ])
+}
+
+resource "google_bigquery_table" "user_training_profile_versions" {
+  dataset_id          = google_bigquery_dataset.coach.dataset_id
+  table_id            = "user_training_profile_versions"
+  deletion_protection = true
+  time_partitioning {
+    type  = "DAY"
+    field = "updated_at"
+  }
+  clustering = ["user_id"]
+  schema = jsonencode([
+    { name = "user_id", type = "STRING", mode = "REQUIRED" },
+    { name = "timezone", type = "STRING", mode = "REQUIRED" },
+    { name = "week_starts_on", type = "INTEGER", mode = "REQUIRED" },
+    { name = "weekly_generation_local_time", type = "TIME", mode = "REQUIRED" },
+    { name = "provider_athlete_id", type = "STRING", mode = "NULLABLE" },
+    { name = "experience_level", type = "STRING", mode = "NULLABLE" },
+    { name = "notifications_enabled", type = "BOOLEAN", mode = "REQUIRED" },
+    { name = "quiet_hours_start", type = "TIME", mode = "NULLABLE" },
+    { name = "quiet_hours_end", type = "TIME", mode = "NULLABLE" },
+    { name = "version", type = "INTEGER", mode = "REQUIRED" },
+    { name = "operation_id", type = "STRING", mode = "REQUIRED" },
+    { name = "updated_at", type = "TIMESTAMP", mode = "REQUIRED" },
+  ])
+}
+
+resource "google_bigquery_table" "weekly_availability_versions" {
+  dataset_id          = google_bigquery_dataset.coach.dataset_id
+  table_id            = "weekly_availability_versions"
+  deletion_protection = true
+  time_partitioning {
+    type  = "DAY"
+    field = "created_at"
+  }
+  clustering = ["user_id"]
+  schema = jsonencode([
+    { name = "id", type = "STRING", mode = "REQUIRED" },
+    { name = "user_id", type = "STRING", mode = "REQUIRED" },
+    { name = "timezone", type = "STRING", mode = "REQUIRED" },
+    { name = "version", type = "INTEGER", mode = "REQUIRED" },
+    { name = "slots", type = "JSON", mode = "REQUIRED" },
+    { name = "overrides", type = "JSON", mode = "REQUIRED" },
+    { name = "supersedes_version_id", type = "STRING", mode = "NULLABLE" },
+    { name = "operation_id", type = "STRING", mode = "REQUIRED" },
+    { name = "created_at", type = "TIMESTAMP", mode = "REQUIRED" },
+  ])
+}
+
+resource "google_bigquery_table" "workout_preferences" {
+  dataset_id          = google_bigquery_dataset.coach.dataset_id
+  table_id            = "workout_preferences"
+  deletion_protection = true
+  time_partitioning {
+    type  = "DAY"
+    field = "created_at"
+  }
+  clustering = ["user_id", "source"]
+  schema = jsonencode([
+    { name = "id", type = "STRING", mode = "REQUIRED" },
+    { name = "user_id", type = "STRING", mode = "REQUIRED" },
+    { name = "version", type = "INTEGER", mode = "REQUIRED" },
+    { name = "preference_type", type = "STRING", mode = "REQUIRED" },
+    { name = "value", type = "JSON", mode = "REQUIRED" },
+    { name = "strength", type = "STRING", mode = "REQUIRED" },
+    { name = "source", type = "STRING", mode = "REQUIRED" },
+    { name = "confidence", type = "FLOAT", mode = "NULLABLE" },
+    { name = "evidence_event_ids", type = "STRING", mode = "REPEATED" },
+    { name = "confirmation_status", type = "STRING", mode = "REQUIRED" },
+    { name = "expires_at", type = "TIMESTAMP", mode = "NULLABLE" },
+    { name = "supersedes_preference_id", type = "STRING", mode = "NULLABLE" },
+    { name = "operation_id", type = "STRING", mode = "REQUIRED" },
+    { name = "created_at", type = "TIMESTAMP", mode = "REQUIRED" },
+  ])
+}
+
+resource "google_bigquery_table" "dated_workout_requests" {
+  dataset_id          = google_bigquery_dataset.coach.dataset_id
+  table_id            = "dated_workout_requests"
+  deletion_protection = true
+  time_partitioning {
+    type  = "DAY"
+    field = "local_date"
+  }
+  clustering = ["user_id", "status"]
+  schema = jsonencode([
+    { name = "id", type = "STRING", mode = "REQUIRED" },
+    { name = "user_id", type = "STRING", mode = "REQUIRED" },
+    { name = "local_date", type = "DATE", mode = "REQUIRED" },
+    { name = "request_type", type = "STRING", mode = "REQUIRED" },
+    { name = "value", type = "JSON", mode = "REQUIRED" },
+    { name = "priority", type = "INTEGER", mode = "REQUIRED" },
+    { name = "status", type = "STRING", mode = "REQUIRED" },
+    { name = "operation_id", type = "STRING", mode = "REQUIRED" },
+    { name = "expires_at", type = "TIMESTAMP", mode = "NULLABLE" },
+    { name = "created_at", type = "TIMESTAMP", mode = "REQUIRED" },
+  ])
+}
+
+resource "google_bigquery_table" "training_plan_lifecycle_events" {
+  dataset_id          = google_bigquery_dataset.coach.dataset_id
+  table_id            = "training_plan_lifecycle_events"
+  deletion_protection = true
+  time_partitioning {
+    type  = "DAY"
+    field = "occurred_at"
+  }
+  clustering = ["user_id", "plan_version_id"]
+  schema = jsonencode([
+    { name = "id", type = "STRING", mode = "REQUIRED" },
+    { name = "user_id", type = "STRING", mode = "REQUIRED" },
+    { name = "plan_version_id", type = "STRING", mode = "REQUIRED" },
+    { name = "from_status", type = "STRING", mode = "REQUIRED" },
+    { name = "to_status", type = "STRING", mode = "REQUIRED" },
+    { name = "reason_code", type = "STRING", mode = "REQUIRED" },
+    { name = "operation_id", type = "STRING", mode = "REQUIRED" },
+    { name = "occurred_at", type = "TIMESTAMP", mode = "REQUIRED" },
+  ])
+}
+
+resource "google_bigquery_table" "workout_execution_states" {
+  dataset_id          = google_bigquery_dataset.coach.dataset_id
+  table_id            = "workout_execution_states"
+  deletion_protection = true
+  time_partitioning {
+    type  = "DAY"
+    field = "recorded_at"
+  }
+  clustering = ["user_id", "planned_workout_id"]
+  schema = jsonencode([
+    { name = "id", type = "STRING", mode = "REQUIRED" },
+    { name = "user_id", type = "STRING", mode = "REQUIRED" },
+    { name = "plan_version_id", type = "STRING", mode = "REQUIRED" },
+    { name = "planned_workout_id", type = "STRING", mode = "REQUIRED" },
+    { name = "revision", type = "INTEGER", mode = "REQUIRED" },
+    { name = "status", type = "STRING", mode = "REQUIRED" },
+    { name = "source_reconciliation_ids", type = "STRING", mode = "REPEATED" },
+    { name = "supersedes_execution_state_id", type = "STRING", mode = "NULLABLE" },
+    { name = "operation_id", type = "STRING", mode = "REQUIRED" },
+    { name = "recorded_at", type = "TIMESTAMP", mode = "REQUIRED" },
+  ])
+}
+
+resource "google_bigquery_table" "safety_gate_results" {
+  dataset_id          = google_bigquery_dataset.coach.dataset_id
+  table_id            = "safety_gate_results"
+  deletion_protection = true
+  time_partitioning {
+    type  = "DAY"
+    field = "evaluated_at"
+  }
+  clustering = ["user_id", "status"]
+  schema = jsonencode([
+    { name = "id", type = "STRING", mode = "REQUIRED" },
+    { name = "user_id", type = "STRING", mode = "REQUIRED" },
+    { name = "planned_workout_id", type = "STRING", mode = "NULLABLE" },
+    { name = "status", type = "STRING", mode = "REQUIRED" },
+    { name = "reason_codes", type = "STRING", mode = "REPEATED" },
+    { name = "rule_version", type = "STRING", mode = "REQUIRED" },
+    { name = "input_snapshot_digest", type = "STRING", mode = "REQUIRED" },
+    { name = "evaluated_at", type = "TIMESTAMP", mode = "REQUIRED" },
+  ])
+}
+
+resource "google_bigquery_table" "readiness_assessments" {
+  dataset_id          = google_bigquery_dataset.coach.dataset_id
+  table_id            = "readiness_assessments"
+  deletion_protection = true
+  time_partitioning {
+    type  = "DAY"
+    field = "created_at"
+  }
+  clustering = ["user_id", "planned_workout_id"]
+  schema = jsonencode([
+    { name = "id", type = "STRING", mode = "REQUIRED" },
+    { name = "user_id", type = "STRING", mode = "REQUIRED" },
+    { name = "local_date", type = "DATE", mode = "REQUIRED" },
+    { name = "planned_workout_id", type = "STRING", mode = "REQUIRED" },
+    { name = "revision", type = "INTEGER", mode = "REQUIRED" },
+    { name = "status", type = "STRING", mode = "REQUIRED" },
+    { name = "safety_gate_result_id", type = "STRING", mode = "REQUIRED" },
+    { name = "reason_codes", type = "STRING", mode = "REPEATED" },
+    { name = "referenced_review_ids", type = "STRING", mode = "REPEATED" },
+    { name = "supersedes_assessment_id", type = "STRING", mode = "NULLABLE" },
+    { name = "rule_version", type = "STRING", mode = "REQUIRED" },
+    { name = "input_snapshot_digest", type = "STRING", mode = "REQUIRED" },
     { name = "created_at", type = "TIMESTAMP", mode = "REQUIRED" },
   ])
 }
