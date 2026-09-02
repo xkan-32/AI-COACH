@@ -24,7 +24,7 @@ LINE rich menu -> LINE webhook -> Cloud Tasks -> LINE event worker
 
 Webhook handlers authenticate, normalize, enqueue, and acknowledge. Workers own external calls and retries. The initial code keeps orchestration in one deployable service; it can be split without changing domain models.
 
-StravaのPOST WebhookはCloud Tasksへのenqueue後、2秒以内に`200 OK`を返す。Cloud Runは低頻度利用向けに最小インスタンス0とstartup CPU boostを使用するため、コールドスタート時の2秒以内応答は保証しない。Stravaから同じActivity `create`が再送されても、`subscription_id/object_type/object_id/aspect_type`の安定キーで一度だけ処理する。
+StravaのPOST WebhookはCloud Tasksへのenqueue後、2秒以内に`200 OK`を返す。Cloud Runは低頻度利用向けに最小インスタンス0とstartup CPU boostを使用するため、コールドスタート時の2秒以内応答は保証しない。Stravaから同じActivity `create`が再送されても、`subscription_id/object_type/object_id/aspect_type`の安定キーで一度だけ処理する。`update`や`delete`では同じobjectに対する連続イベントを区別するため、このキーに`event_time`を加える。
 
 リッチメニューは既存機能への入口であり、Strava更新権限を持たない。`action=menu`はLINE event worker内のrouterで案内へ変換し、署名・期限付きの`action=proposal`だけが承認workerを起動できる。
 
@@ -39,8 +39,11 @@ StravaのPOST WebhookはCloud Tasksへのenqueue後、2秒以内に`200 OK`を�
 - `proposals`: next-day workout, model/prompt version, safety result, approval status
 - `webhook_events`: provider event key, received/processed status, retry metadata
 - `audit_events`: approval and Strava mutation evidence
+- `oauth_sessions`: OAuth state nonce, LINE user ID, and `expires_at` with Firestore TTL
+- `condition_drafts`: in-progress condition response and `expires_at` with Firestore TTL
+- `activity_contexts`: activity-to-LINE-user context and `expires_at` with Firestore TTL
 
-BigQuery is appropriate for history and analysis. A small transactional store such as Firestore is recommended for OAuth refresh-token rotation, webhook idempotency locks, and approval state transitions; using BigQuery alone for these mutable workflows is risky.
+BigQuery is used for immutable history and analysis. Firestore is used for OAuth token rotation, webhook idempotency locks, conversation state, and approval state transitions; BigQuery alone is not suitable for these mutable workflows.
 
 ## Safety boundary
 
@@ -53,6 +56,7 @@ The model chooses within a bounded envelope. A deterministic policy can force re
 - Bind encrypted Strava tokens to athlete ID, LINE user ID, and token type with authenticated additional data.
 - Use separate least-privilege service accounts for API and workers.
 - Do not log access tokens, raw authorization headers, or unnecessary health comments.
+- Log only safe Strava failure metadata such as `error_kind` and HTTP status code; do not log tokens or upstream response bodies.
 - Sign approval postbacks, expire them, and bind them to athlete and proposal IDs.
 
 ## PF-01 目標・運動環境

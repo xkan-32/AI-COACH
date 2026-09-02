@@ -27,7 +27,9 @@ Strava Webhook -> Cloud Tasks -> Activity取得・保存
 実装済み:
 
 - Terraform、WIF、GitHub Actions、Cloud Run、Cloud Tasks、Firestore、BigQuery、Secret Manager
-- Strava OAuth、Webhook、Activity取得、重複排除
+- Strava OAuth、Webhook、Activity取得、Activity create再送の安定event keyによる重複排除
+- Strava tokenのAES-256-GCM暗号化、OAuth session期限検証、一時FirestoreデータのTTL
+- Strava Webhookの`200 OK`応答と、Activity取得失敗時の秘密情報を含まない安全ログ
 - LINE Webhook、体調4択、詳細入力、遅延返信用会話state
 - Vertex AI構造化提案と安全制約
 - 署名・期限付き承認、冪等なDescription更新
@@ -80,9 +82,9 @@ Strava Webhook -> Cloud Tasks -> Activity取得・保存
   - 器具: 自重、ダンベル、バーベル、ケトルベル、マシン、チューブ、ローラー台
 - `ルームバイク`、`エアロバイク`、`フィットネスバイク`等の表記揺れは`インドアバイク`へ正規化する。`ローラー台`は自転車を使う器具として別項目にする。
 - 未定義項目は詳細欄へ保持できるようにし、既知区分へ誤って変換しない。
-- リッチメニューの`settings`から一覧・編集を開始できるpostback導線を追加し、未実装案内を置き換える。
-- 入力stateにTTL、cancel、重複排除を設ける。
-- 次回AI提案へ最新値が反映されるtestを作る。
+- リッチメニューの`settings`から一覧・編集を開始できるpostback導線を追加し、未実装案内を置き換えた。
+- 入力stateにTTL、cancel、重複排除を設けた。
+- 次回AI提案へ最新値が反映されるtestを追加した。
 
 完了条件:
 

@@ -31,7 +31,7 @@ LINEリッチメニューの「設定」から、目標・プロフィール・�
 - `app/web_settings.py`: 署名付きワンタイムリンク、30分session、所有者・期限検証
 - `app/static/profile-settings.html`: モバイル対応の一覧・編集画面
 - `app/main.py`: LINE worker routing、設定ページ/API、AI context連携
-- `infra/terraform/firestore_ttl.tf`: draftとワンタイムリンクのTTL
+- `infra/terraform/firestore_ttl.tf`: `profile_drafts`、`profile_settings_links`、`oauth_sessions`、`condition_drafts`、`activity_contexts`のTTL
 - `tests/test_profile.py`, `tests/test_web_settings.py`: 会話、Web設定、期限、冪等性、AI連携
 
 ## 完了した導線

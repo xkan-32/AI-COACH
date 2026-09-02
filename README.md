@@ -44,7 +44,7 @@ pytest
 
 ## 実装順
 
-MVPのコアフロー、Cloud Tasks、Terraform/CI/CD、LINEリッチメニュー、PF-01はコード上実装済みです。次はOAuth/token保存のhardening、直近Activity・体調履歴のAI context連携、AC-01、監視・DLQ、sandbox E2Eを進めます。実サービスの設定、deploy、秘密値登録は明示的な承認後に行います。
+MVPのコアフロー、Cloud Tasks、Terraform/CI/CD、LINEリッチメニュー、PF-01、Strava token暗号化、OAuth session期限検証・TTL、Webhook再送の重複排除はコード上実装済みです。次は直近Activity・体調履歴のAI context連携、AC-01、監視・DLQ、sandbox E2Eを進めます。実サービスの設定、deploy、秘密値登録は明示的な承認後に行います。
 
 ## LINEテキストコマンド
 
