@@ -20,7 +20,7 @@ from app.ingestion import ActivityIngestionService, UnknownAthleteToken
 from app.line_menu import MenuActionError, MenuActionRouter
 from app.oauth import InvalidOAuthState, OAuthStateSigner, strava_authorization_url
 from app.oauth_service import StravaOAuthService, UnknownOAuthSession
-from app.profile import ProfileCommandError, ProfileCommandService
+from app.profile import ProfileCommandError, ProfileWorkflow
 from app.runtime import build_runtime
 from app.security import (
     ApprovalActionError,
@@ -233,8 +233,11 @@ async def process_line_event(event: dict) -> None:
         runtime.messenger,
         on_completed=create_coaching_proposal,
     )
-    profile_commands = ProfileCommandService(
-        runtime.goals, runtime.training_resources, runtime.messenger
+    profile_workflow = ProfileWorkflow(
+        runtime.goals,
+        runtime.training_resources,
+        runtime.profile_drafts,
+        runtime.messenger,
     )
     menu_actions = MenuActionRouter(runtime.messenger)
     event_type = event.get("type")
@@ -242,6 +245,8 @@ async def process_line_event(event: dict) -> None:
     try:
         if event_type == "postback":
             data = event.get("postback", {}).get("data", "")
+            if await profile_workflow.handle_postback(line_user_id, data):
+                return
             if await menu_actions.handle(line_user_id, data):
                 return
             values = {key: value[0] for key, value in parse_qs(data).items() if value}
@@ -284,7 +289,7 @@ async def process_line_event(event: dict) -> None:
                 f"{authorization_url}",
             )
             return
-        if await profile_commands.handle(line_user_id, text):
+        if await profile_workflow.handle_text(line_user_id, text):
             return
         await workflow.handle_text(line_user_id, text)
     except (ApprovalActionError, ProposalExpired):
