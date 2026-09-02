@@ -1,3 +1,4 @@
+import base64
 from datetime import UTC, datetime
 
 import pytest
@@ -6,7 +7,10 @@ from app.activity_data import (
     InMemoryActivityIngestionStateStore,
     InMemoryActivityLapStore,
     InMemoryActivityMetricsStore,
+    InMemoryActivitySegmentStore,
     InMemoryActivityStreamStore,
+    InMemoryRouteComparisonStore,
+    InMemoryRouteFingerprintStore,
 )
 from app.condition import InMemoryActivityContextStore
 from app.domain.models import Activity, ActivityLap, ActivityStreamPoint
@@ -17,8 +21,9 @@ from app.ingestion import (
     _supports_detailed_streams,
 )
 from app.line import InMemoryConditionPromptSender
+from app.segment_analysis import RouteFingerprintHasher, compute_segment_metrics
 from app.state import InMemoryStravaTokenStore
-from app.strava import StoredStravaToken, StravaRefreshResponse
+from app.strava import RouteStreamPoint, StoredStravaToken, StravaRefreshResponse
 
 
 class FakeStrava:
@@ -300,3 +305,93 @@ async def test_failed_prompt_is_retried_before_marking_complete() -> None:
 
     assert prompt.calls == 2
     assert ("99", "prompt") in state.completed
+
+
+async def test_ingestion_builds_same_route_comparison_without_storing_gps() -> None:
+    class RouteStrava(FakeStrava):
+        async def get_activity_laps(
+            self,
+            activity_id: str,
+            athlete_id: str,
+            activity_type: str,
+            access_token: str,
+        ) -> list[ActivityLap]:
+            return []
+
+        async def get_activity_streams(
+            self, activity_id: str, athlete_id: str, access_token: str
+        ) -> list[ActivityStreamPoint]:
+            return [
+                ActivityStreamPoint(
+                    activity_id=activity_id,
+                    athlete_id=athlete_id,
+                    sample_index=index,
+                    time_seconds=index * 75,
+                    distance_meters=index * 250,
+                    altitude_meters=100 + index,
+                    velocity_mps=3,
+                    heartrate_bpm=140,
+                    cadence_rpm=84,
+                    moving=True,
+                    grade_percent=1,
+                )
+                for index in range(21)
+            ]
+
+        async def get_activity_route_points(
+            self, activity_id: str, access_token: str
+        ) -> list[RouteStreamPoint]:
+            return [
+                RouteStreamPoint(
+                    distance_meters=index * 250,
+                    latitude=35 + index * 0.001,
+                    longitude=139 + index * 0.001,
+                )
+                for index in range(21)
+            ]
+
+    tokens = InMemoryStravaTokenStore()
+    await tokens.save(StoredStravaToken("42", "line-user", "access", "refresh", 20_000))
+    segments = InMemoryActivitySegmentStore()
+    fingerprints = InMemoryRouteFingerprintStore()
+    comparisons = InMemoryRouteComparisonStore()
+    hasher = RouteFingerprintHasher(base64.b64encode(b"r" * 32).decode("ascii"))
+    strava = RouteStrava()
+    for previous_id in ("previous-1", "previous-2"):
+        previous = (await strava.get_activity(previous_id, "access")).model_copy(
+            update={"id": previous_id}
+        )
+        previous_points = await strava.get_activity_streams(previous_id, "42", "access")
+        await segments.save_many(compute_segment_metrics(previous, previous_points))
+        route = await strava.get_activity_route_points(previous_id, "access")
+        fingerprint = hasher.create(
+            previous,
+            [(item.distance_meters, item.latitude, item.longitude) for item in route],
+        )
+        assert fingerprint is not None
+        await fingerprints.save(fingerprint)
+    state = InMemoryActivityIngestionStateStore()
+    service = ActivityIngestionService(
+        strava,
+        tokens,
+        InMemoryActivityStore(),
+        InMemoryConditionPromptSender(),
+        InMemoryActivityContextStore(),
+        InMemoryActivityLapStore(),
+        InMemoryActivityStreamStore(),
+        InMemoryActivityMetricsStore(),
+        state,
+        segments,
+        fingerprints,
+        comparisons,
+        hasher,
+        clock=lambda: 1_000,
+    )
+
+    await service.ingest("current", "42")
+
+    comparison = await comparisons.get("current")
+    assert comparison is not None
+    assert comparison.baseline_activity_count == 2
+    assert ("current", "route_fingerprint") in state.completed
+    assert not hasattr(comparison, "latitude")

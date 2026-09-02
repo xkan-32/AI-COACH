@@ -16,6 +16,7 @@ locals {
     "strava-verify-token",
     "oauth-state-signing-key",
     "strava-token-encryption-key",
+    "route-fingerprint-key",
   ])
 }
 
@@ -135,6 +136,7 @@ resource "google_cloud_run_v2_service" "api" {
           LINE_CHANNEL_ACCESS_TOKEN = "line-channel-access-token"
           OAUTH_STATE_SIGNING_KEY   = "oauth-state-signing-key"
           TOKEN_ENCRYPTION_KEY      = "strava-token-encryption-key"
+          ROUTE_FINGERPRINT_KEY     = "route-fingerprint-key"
         }
         content {
           name = env.key

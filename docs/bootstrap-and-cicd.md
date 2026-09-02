@@ -129,6 +129,7 @@ gcloud secrets versions add line-channel-secret --data-file=-
 gcloud secrets versions add line-channel-access-token --data-file=-
 gcloud secrets versions add oauth-state-signing-key --data-file=-
 gcloud secrets versions add strava-token-encryption-key --data-file=-
+gcloud secrets versions add route-fingerprint-key --data-file=-
 ```
 
 Generate the OAuth signing key and Strava verify token with a cryptographically secure generator. Generate the AES-256-GCM token-encryption key as exactly 32 random bytes:
@@ -138,7 +139,7 @@ openssl rand -base64 48
 openssl rand -base64 32
 ```
 
-Run the appropriate command separately for each generated value. Secret payloads are the only GCP configuration intentionally not managed by Terraform. Production startup requires `strava-token-encryption-key`; do not rotate it until all existing `strava_tokens` documents have been re-encrypted with the replacement key. `scripts/register-provider-secrets.sh` creates this key only when no enabled version exists.
+Run the appropriate command separately for each generated value. Secret payloads are the only GCP configuration intentionally not managed by Terraform. Production startup requires `strava-token-encryption-key` and `route-fingerprint-key`; do not rotate either key until encrypted tokens have been re-encrypted or route fingerprints have been backfilled, respectively. `scripts/register-provider-secrets.sh` creates both keys only when no enabled version exists.
 
 ### Existing environment migration
 

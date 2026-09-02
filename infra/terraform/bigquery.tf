@@ -118,6 +118,88 @@ resource "google_bigquery_table" "activity_metrics" {
   ])
 }
 
+resource "google_bigquery_table" "activity_segment_metrics" {
+  dataset_id          = google_bigquery_dataset.coach.dataset_id
+  table_id            = "activity_segment_metrics"
+  deletion_protection = true
+  time_partitioning {
+    type  = "DAY"
+    field = "activity_started_at"
+  }
+  clustering = ["athlete_id", "activity_id"]
+  schema = jsonencode([
+    { name = "activity_id", type = "STRING", mode = "REQUIRED" },
+    { name = "athlete_id", type = "STRING", mode = "REQUIRED" },
+    { name = "activity_started_at", type = "TIMESTAMP", mode = "REQUIRED" },
+    { name = "computation_version", type = "STRING", mode = "REQUIRED" },
+    { name = "segment_index", type = "INTEGER", mode = "REQUIRED" },
+    { name = "start_distance_meters", type = "FLOAT", mode = "REQUIRED" },
+    { name = "end_distance_meters", type = "FLOAT", mode = "REQUIRED" },
+    { name = "elapsed_seconds", type = "INTEGER", mode = "NULLABLE" },
+    { name = "pace_seconds_per_km", type = "FLOAT", mode = "NULLABLE" },
+    { name = "elevation_gain_meters", type = "FLOAT", mode = "NULLABLE" },
+    { name = "elevation_loss_meters", type = "FLOAT", mode = "NULLABLE" },
+    { name = "average_grade_percent", type = "FLOAT", mode = "NULLABLE" },
+    { name = "average_heartrate_bpm", type = "FLOAT", mode = "NULLABLE" },
+    { name = "max_heartrate_bpm", type = "FLOAT", mode = "NULLABLE" },
+    { name = "average_cadence_per_minute", type = "FLOAT", mode = "NULLABLE" },
+    { name = "relative_load_rank_percentile", type = "FLOAT", mode = "NULLABLE" },
+    { name = "high_load_reasons", type = "STRING", mode = "REPEATED" },
+    { name = "metric_quality", type = "STRING", mode = "REQUIRED" },
+    { name = "quality_reasons", type = "STRING", mode = "REPEATED" },
+    { name = "computed_at", type = "TIMESTAMP", mode = "REQUIRED" },
+  ])
+}
+
+resource "google_bigquery_table" "activity_route_fingerprints" {
+  dataset_id          = google_bigquery_dataset.coach.dataset_id
+  table_id            = "activity_route_fingerprints"
+  deletion_protection = true
+  time_partitioning {
+    type  = "DAY"
+    field = "activity_started_at"
+  }
+  clustering = ["athlete_id", "route_hash"]
+  schema = jsonencode([
+    { name = "activity_id", type = "STRING", mode = "REQUIRED" },
+    { name = "athlete_id", type = "STRING", mode = "REQUIRED" },
+    { name = "activity_started_at", type = "TIMESTAMP", mode = "REQUIRED" },
+    { name = "fingerprint_version", type = "STRING", mode = "REQUIRED" },
+    { name = "route_hash", type = "STRING", mode = "REQUIRED" },
+    { name = "covered_distance_meters", type = "FLOAT", mode = "REQUIRED" },
+    { name = "sampled_point_count", type = "INTEGER", mode = "REQUIRED" },
+    { name = "trim_start_meters", type = "FLOAT", mode = "REQUIRED" },
+    { name = "trim_end_meters", type = "FLOAT", mode = "REQUIRED" },
+    { name = "quantization_decimals", type = "INTEGER", mode = "REQUIRED" },
+    { name = "computed_at", type = "TIMESTAMP", mode = "REQUIRED" },
+  ])
+}
+
+resource "google_bigquery_table" "activity_route_comparisons" {
+  dataset_id          = google_bigquery_dataset.coach.dataset_id
+  table_id            = "activity_route_comparisons"
+  deletion_protection = true
+  time_partitioning {
+    type  = "DAY"
+    field = "activity_started_at"
+  }
+  clustering = ["athlete_id", "route_hash"]
+  schema = jsonencode([
+    { name = "activity_id", type = "STRING", mode = "REQUIRED" },
+    { name = "athlete_id", type = "STRING", mode = "REQUIRED" },
+    { name = "activity_started_at", type = "TIMESTAMP", mode = "REQUIRED" },
+    { name = "route_hash", type = "STRING", mode = "REQUIRED" },
+    { name = "comparison_version", type = "STRING", mode = "REQUIRED" },
+    { name = "baseline_activity_count", type = "INTEGER", mode = "REQUIRED" },
+    { name = "previous_activity_id", type = "STRING", mode = "NULLABLE" },
+    { name = "pace_delta_percent", type = "FLOAT", mode = "NULLABLE" },
+    { name = "heartrate_delta_bpm", type = "FLOAT", mode = "NULLABLE" },
+    { name = "cadence_delta_per_minute", type = "FLOAT", mode = "NULLABLE" },
+    { name = "high_load_segment_indexes", type = "INTEGER", mode = "REPEATED" },
+    { name = "computed_at", type = "TIMESTAMP", mode = "REQUIRED" },
+  ])
+}
+
 resource "google_bigquery_table" "condition_reports" {
   dataset_id          = google_bigquery_dataset.coach.dataset_id
   table_id            = "condition_reports"
