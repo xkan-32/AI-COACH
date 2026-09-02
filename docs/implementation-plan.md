@@ -38,6 +38,7 @@ Exit: a real Strava activity creates exactly one stored activity and one LINE pr
 - Ask body-part/severity follow-ups only for discomfort or pain
 - Query active goal and equipment context
 - Query recent Activity and Condition history and include safe derived metrics in coaching context
+- Include GPS-free 250m high-load evidence and same-route deltas while excluding route hashes and raw coordinates
 - Call Vertex AI with a JSON response schema
 - Apply hard safety constraints before and validate them after generation
 - Persist prompt version, model, proposal output, and approval state

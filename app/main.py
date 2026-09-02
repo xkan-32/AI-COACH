@@ -343,6 +343,10 @@ async def ingest_activity_task(
         runtime.activity_streams,
         runtime.activity_metrics,
         runtime.activity_ingestion_state,
+        runtime.activity_segments,
+        runtime.route_fingerprints,
+        runtime.route_comparisons,
+        runtime.route_hasher,
     )
     try:
         activity = await service.ingest(str(event.object_id), str(event.owner_id))
@@ -488,6 +492,12 @@ async def create_coaching_proposal(report) -> None:
             context.athlete_id, limit=10
         ),
         current_activity_metrics=await runtime.activity_metrics.get(report.activity_id),
+        high_load_segments=await runtime.activity_segments.list_high_load(
+            report.activity_id, limit=5
+        ),
+        current_route_comparison=await runtime.route_comparisons.get(
+            report.activity_id
+        ),
     )
     try:
         await service.create_proposal(

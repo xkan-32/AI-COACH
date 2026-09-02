@@ -60,5 +60,8 @@ register_secret "line-channel-access-token" "LINE Channel Access Token"
 register_generated_secret_once \
   "strava-token-encryption-key" \
   "Strava Token Encryption Key"
+register_generated_secret_once \
+  "route-fingerprint-key" \
+  "Route Fingerprint Key"
 
-printf '外部サービスの秘密値とトークン暗号化鍵を登録しました。\n'
+printf '外部サービスの秘密値と暗号鍵を登録しました。\n'

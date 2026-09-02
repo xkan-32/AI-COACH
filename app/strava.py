@@ -152,6 +152,13 @@ class StoredStravaToken:
     expires_at: int
 
 
+@dataclass(frozen=True)
+class RouteStreamPoint:
+    distance_meters: float
+    latitude: float
+    longitude: float
+
+
 class StravaClient:
     token_url = "https://www.strava.com/oauth/token"
     api_base_url = "https://www.strava.com/api/v3"
@@ -277,6 +284,36 @@ class StravaClient:
                 "Strava activity streams fetch failed", error_kind="invalid_response"
             ) from exc
 
+    async def get_activity_route_points(
+        self, activity_id: str, access_token: str
+    ) -> list[RouteStreamPoint]:
+        try:
+            async with httpx.AsyncClient(timeout=self._timeout) as client:
+                response = await client.get(
+                    f"{self.api_base_url}/activities/{activity_id}/streams",
+                    headers={"Authorization": f"Bearer {access_token}"},
+                    params={
+                        "keys": "time,distance,latlng",
+                        "key_by_type": "true",
+                    },
+                )
+                response.raise_for_status()
+                return _route_stream_points(response.json())
+        except httpx.HTTPStatusError as exc:
+            raise StravaApiError(
+                "Strava activity route fetch failed",
+                status_code=exc.response.status_code,
+                error_kind="http_status",
+            ) from exc
+        except httpx.RequestError as exc:
+            raise StravaApiError(
+                "Strava activity route fetch failed", error_kind="transport"
+            ) from exc
+        except (TypeError, ValueError) as exc:
+            raise StravaApiError(
+                "Strava activity route fetch failed", error_kind="invalid_response"
+            ) from exc
+
     async def update_description(
         self, activity_id: str, access_token: str, description: str
     ) -> None:
@@ -369,6 +406,41 @@ def _cadence_per_minute(activity_type: str, raw_cadence: float | None) -> float 
     if activity_type in {"Run", "TrailRun", "VirtualRun", "Walk", "Hike"}:
         return raw_cadence * 2
     return raw_cadence
+
+
+def _route_stream_points(payload: object) -> list[RouteStreamPoint]:
+    if not isinstance(payload, dict):
+        raise TypeError("Expected keyed route stream response")
+    distance = payload.get("distance")
+    latlng = payload.get("latlng")
+    if (
+        not isinstance(distance, dict)
+        or not isinstance(distance.get("data"), list)
+        or not isinstance(latlng, dict)
+        or not isinstance(latlng.get("data"), list)
+    ):
+        raise TypeError("Route streams are missing")
+    distances = distance["data"]
+    coordinates = latlng["data"]
+    if len(distances) != len(coordinates):
+        raise ValueError("Route stream lengths do not match")
+    points = []
+    for meters, coordinate in zip(distances, coordinates, strict=True):
+        if (
+            not isinstance(meters, (int, float))
+            or not isinstance(coordinate, list)
+            or len(coordinate) != 2
+            or not all(isinstance(value, (int, float)) for value in coordinate)
+        ):
+            raise TypeError("Invalid route coordinate")
+        points.append(
+            RouteStreamPoint(
+                distance_meters=float(meters),
+                latitude=float(coordinate[0]),
+                longitude=float(coordinate[1]),
+            )
+        )
+    return points
 
 
 StravaOAuthClient = StravaClient

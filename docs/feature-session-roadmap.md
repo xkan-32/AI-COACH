@@ -37,6 +37,7 @@ Strava Webhook -> Cloud Tasks -> Activity取得・保存
 - LINEリッチメニュー（RM-01〜04: UI、冪等同期、action router、CI/CD同期）
 - PF-01（構造化された目標・運動環境、会話UI、署名付きWeb設定ページ、AI context連携）
 - AC-01（Activity詳細、GPS非保存のLaps/Streams、versioned派生指標、直近履歴のAI context連携）
+- AC-02（GPS非保存の250m区間負荷、HMAC route fingerprint、同一ルート比較）
 
 未実装・拡張対象:
 
@@ -54,6 +55,7 @@ Strava Webhook -> Cloud Tasks -> Activity取得・保存
 | 完了 | RM-01〜04 | LINEリッチメニュー | 現行LINE worker |
 | 完了 | PF-01 | 目標・プロフィールUI | リッチメニュー |
 | 完了 | AC-01 | Activity/Laps/Streams | Strava取得 |
+| 完了 | AC-02 | 区間負荷・同一ルート比較 | AC-01 |
 | 1 | MA-01 | 手動Activity | Activityモデル、メニュー |
 | 2 | WT-01 | 体重記録 | メニュー、データ基盤 |
 | 3 | PL-01 | 長期・週間・日次計画 | 目標、Activity、体重 |
@@ -106,6 +108,12 @@ PF-01の対象外:
 - 生streamと`computation_version`付き派生指標を分離し、再計算可能にした。
 - GPS座標は要求・保存・ログ・AI送信を行わない。
 - Webhook／Task再送時の保存とLINE体調確認を冪等化し、直近Activity・Conditionと派生指標をAI contextへ渡す。
+
+### AC-02 区間負荷・同一ルート比較（完了）
+
+- GPS非依存streamを250m区間へ集約し、相対負荷rankと根拠コードを保存する。
+- route識別時だけworkerメモリ内で座標を処理し、HMAC化後は座標とcanonical点列を破棄する。
+- 同一routeの過去2件以上を基準にpace、心拍、cadence差分を作成し、安全なsummaryだけをAI contextへ渡す。
 
 ### MA-01 LINE手動Activity
 

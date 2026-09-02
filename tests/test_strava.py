@@ -135,3 +135,36 @@ async def test_stream_fetch_classifies_rate_limit(monkeypatch) -> None:
 
     assert raised.value.status_code == 429
     assert raised.value.error_kind == "http_status"
+
+
+async def test_route_stream_is_returned_transiently_without_domain_gps(
+    monkeypatch,
+) -> None:
+    real_async_client = httpx.AsyncClient
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.params["keys"] == "time,distance,latlng"
+        return httpx.Response(
+            200,
+            json={
+                "time": {"data": [0, 10]},
+                "distance": {"data": [0, 30]},
+                "latlng": {"data": [[35.0, 139.0], [35.001, 139.001]]},
+            },
+            request=request,
+        )
+
+    monkeypatch.setattr(
+        httpx,
+        "AsyncClient",
+        lambda **kwargs: real_async_client(
+            transport=httpx.MockTransport(handler), **kwargs
+        ),
+    )
+
+    points = await StravaClient("client-id", "client-secret").get_activity_route_points(
+        "activity-1", "secret"
+    )
+
+    assert points[1].distance_meters == 30
+    assert points[1].latitude == 35.001

@@ -6,13 +6,21 @@ from app.activity_data import (
     ActivityIngestionStateStore,
     ActivityLapStore,
     ActivityMetricsStore,
+    ActivitySegmentStore,
     ActivityStreamStore,
+    RouteComparisonStore,
+    RouteFingerprintStore,
 )
 from app.activity_metrics import compute_activity_metrics
 from app.condition import ActivityContext, ActivityContextStore
 from app.domain.models import Activity
+from app.segment_analysis import (
+    RouteFingerprintHasher,
+    compare_route_segments,
+    compute_segment_metrics,
+)
 from app.state import StravaTokenStore
-from app.strava import StoredStravaToken, StravaClient
+from app.strava import StoredStravaToken, StravaApiError, StravaClient
 
 
 class ActivityStore(Protocol):
@@ -41,6 +49,10 @@ class ActivityIngestionService:
         streams: ActivityStreamStore | None = None,
         metrics: ActivityMetricsStore | None = None,
         ingestion_state: ActivityIngestionStateStore | None = None,
+        segments: ActivitySegmentStore | None = None,
+        route_fingerprints: RouteFingerprintStore | None = None,
+        route_comparisons: RouteComparisonStore | None = None,
+        route_hasher: RouteFingerprintHasher | None = None,
         refresh_margin_seconds: int = 300,
         clock=time.time,
     ) -> None:
@@ -53,6 +65,10 @@ class ActivityIngestionService:
         self._streams = streams
         self._metrics = metrics
         self._ingestion_state = ingestion_state
+        self._segments = segments
+        self._route_fingerprints = route_fingerprints
+        self._route_comparisons = route_comparisons
+        self._route_hasher = route_hasher
         self._refresh_margin = refresh_margin_seconds
         self._clock = clock
 
@@ -110,6 +126,18 @@ class ActivityIngestionService:
                     compute_activity_metrics(activity, laps, points)
                 )
                 await self._ingestion_state.complete(activity_id, "metrics")
+            if self._segments is not None:
+                segment_metrics = compute_segment_metrics(activity, points)
+                if not await self._ingestion_state.is_completed(
+                    activity_id, "segment_metrics"
+                ):
+                    await self._segments.save_many(segment_metrics)
+                    await self._ingestion_state.complete(activity_id, "segment_metrics")
+                await self._process_route(
+                    activity,
+                    token.access_token,
+                    segment_metrics,
+                )
         await self._contexts.save(
             ActivityContext(activity.id, activity.athlete_id, token.line_user_id)
         )
@@ -121,6 +149,60 @@ class ActivityIngestionService:
             if self._ingestion_state is not None:
                 await self._ingestion_state.complete(activity_id, "prompt")
         return activity
+
+    async def _process_route(
+        self,
+        activity: Activity,
+        access_token: str,
+        segments,
+    ) -> None:
+        if (
+            self._ingestion_state is None
+            or self._route_hasher is None
+            or self._route_fingerprints is None
+            or self._route_comparisons is None
+            or self._segments is None
+            or await self._ingestion_state.is_completed(activity.id, "route_comparison")
+        ):
+            return
+        fingerprint = None
+        try:
+            route_points = await self._strava.get_activity_route_points(
+                activity.id, access_token
+            )
+            fingerprint = self._route_hasher.create(
+                activity,
+                [
+                    (point.distance_meters, point.latitude, point.longitude)
+                    for point in route_points
+                ],
+            )
+        except StravaApiError:
+            pass
+        if fingerprint is None:
+            await self._ingestion_state.complete(activity.id, "route_fingerprint")
+            await self._ingestion_state.complete(activity.id, "route_comparison")
+            return
+        if not await self._ingestion_state.is_completed(
+            activity.id, "route_fingerprint"
+        ):
+            await self._route_fingerprints.save(fingerprint)
+            await self._ingestion_state.complete(activity.id, "route_fingerprint")
+        previous = await self._route_fingerprints.list_recent_same_route(
+            activity.athlete_id,
+            fingerprint.route_hash,
+            activity.id,
+            limit=5,
+        )
+        baselines = [
+            await self._segments.list_by_activity(item.activity_id) for item in previous
+        ]
+        comparison = compare_route_segments(
+            activity, fingerprint.route_hash, segments, baselines
+        )
+        if comparison is not None:
+            await self._route_comparisons.save(comparison)
+        await self._ingestion_state.complete(activity.id, "route_comparison")
 
     async def _refresh_if_needed(self, token: StoredStravaToken) -> StoredStravaToken:
         if token.expires_at > int(self._clock()) + self._refresh_margin:

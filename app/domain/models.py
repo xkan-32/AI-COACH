@@ -135,6 +135,58 @@ class ActivityMetrics(BaseModel):
     computed_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
+class ActivitySegmentMetrics(BaseModel):
+    activity_id: str
+    athlete_id: str
+    activity_started_at: datetime
+    computation_version: str
+    segment_index: int = Field(ge=0)
+    start_distance_meters: float = Field(ge=0)
+    end_distance_meters: float = Field(ge=0)
+    elapsed_seconds: int | None = Field(default=None, ge=0)
+    pace_seconds_per_km: float | None = Field(default=None, ge=0)
+    elevation_gain_meters: float | None = Field(default=None, ge=0)
+    elevation_loss_meters: float | None = Field(default=None, ge=0)
+    average_grade_percent: float | None = None
+    average_heartrate_bpm: float | None = Field(default=None, ge=0)
+    max_heartrate_bpm: float | None = Field(default=None, ge=0)
+    average_cadence_per_minute: float | None = Field(default=None, ge=0)
+    relative_load_rank_percentile: float | None = Field(default=None, ge=0, le=100)
+    high_load_reasons: list[str] = Field(default_factory=list)
+    metric_quality: str
+    quality_reasons: list[str] = Field(default_factory=list)
+    computed_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+
+
+class RouteFingerprint(BaseModel):
+    activity_id: str
+    athlete_id: str
+    activity_started_at: datetime
+    fingerprint_version: str
+    route_hash: str
+    covered_distance_meters: float = Field(ge=0)
+    sampled_point_count: int = Field(ge=0)
+    trim_start_meters: float = Field(ge=0)
+    trim_end_meters: float = Field(ge=0)
+    quantization_decimals: int = Field(ge=0, le=6)
+    computed_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+
+
+class RouteComparisonSummary(BaseModel):
+    activity_id: str
+    athlete_id: str
+    activity_started_at: datetime
+    route_hash: str
+    comparison_version: str
+    baseline_activity_count: int = Field(ge=0)
+    previous_activity_id: str | None = None
+    pace_delta_percent: float | None = None
+    heartrate_delta_bpm: float | None = None
+    cadence_delta_per_minute: float | None = None
+    high_load_segment_indexes: list[int] = Field(default_factory=list)
+    computed_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+
+
 class ConditionReport(BaseModel):
     athlete_id: str
     activity_id: str
@@ -152,6 +204,8 @@ class CoachingContext(BaseModel):
     recent_activities: list[Activity] = Field(default_factory=list)
     recent_conditions: list[ConditionReport] = Field(default_factory=list)
     current_activity_metrics: ActivityMetrics | None = None
+    high_load_segments: list[ActivitySegmentMetrics] = Field(default_factory=list)
+    current_route_comparison: RouteComparisonSummary | None = None
 
 
 class WorkoutProposal(BaseModel):

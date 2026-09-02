@@ -1,18 +1,28 @@
+import base64
 from dataclasses import dataclass
 
 from app.activity_data import (
     ActivityIngestionStateStore,
     ActivityLapStore,
     ActivityMetricsStore,
+    ActivitySegmentStore,
     ActivityStreamStore,
     BigQueryActivityLapStore,
     BigQueryActivityMetricsStore,
+    BigQueryActivitySegmentStore,
     BigQueryActivityStreamStore,
+    BigQueryRouteComparisonStore,
+    BigQueryRouteFingerprintStore,
     FirestoreActivityIngestionStateStore,
     InMemoryActivityIngestionStateStore,
     InMemoryActivityLapStore,
     InMemoryActivityMetricsStore,
+    InMemoryActivitySegmentStore,
     InMemoryActivityStreamStore,
+    InMemoryRouteComparisonStore,
+    InMemoryRouteFingerprintStore,
+    RouteComparisonStore,
+    RouteFingerprintStore,
 )
 from app.approval import (
     CompositeProposalStore,
@@ -61,6 +71,7 @@ from app.profile import (
     ProfileDraftStore,
     TrainingResourceStore,
 )
+from app.segment_analysis import RouteFingerprintHasher
 from app.state import (
     EventStore,
     FirestoreEventStore,
@@ -102,6 +113,10 @@ class Runtime:
     activity_laps: ActivityLapStore
     activity_streams: ActivityStreamStore
     activity_metrics: ActivityMetricsStore
+    activity_segments: ActivitySegmentStore
+    route_fingerprints: RouteFingerprintStore
+    route_comparisons: RouteComparisonStore
+    route_hasher: RouteFingerprintHasher
     activity_ingestion_state: ActivityIngestionStateStore
     activity_contexts: ActivityContextStore
     condition_prompts: ConditionPromptSender
@@ -135,6 +150,12 @@ def build_runtime(settings: Settings) -> Runtime:
             activity_laps=InMemoryActivityLapStore(),
             activity_streams=InMemoryActivityStreamStore(),
             activity_metrics=InMemoryActivityMetricsStore(),
+            activity_segments=InMemoryActivitySegmentStore(),
+            route_fingerprints=InMemoryRouteFingerprintStore(),
+            route_comparisons=InMemoryRouteComparisonStore(),
+            route_hasher=RouteFingerprintHasher(
+                base64.b64encode(b"r" * 32).decode("ascii")
+            ),
             activity_ingestion_state=InMemoryActivityIngestionStateStore(),
             activity_contexts=InMemoryActivityContextStore(),
             condition_prompts=line,
@@ -159,6 +180,7 @@ def build_runtime(settings: Settings) -> Runtime:
         "task_service_account_email": settings.task_service_account_email,
         "line_channel_access_token": settings.line_channel_access_token,
         "token_encryption_key": settings.token_encryption_key,
+        "route_fingerprint_key": settings.route_fingerprint_key,
     }
     missing = [name for name, value in required.items() if not value]
     if missing:
@@ -211,6 +233,16 @@ def build_runtime(settings: Settings) -> Runtime:
         activity_metrics=BigQueryActivityMetricsStore(
             bigquery_client, f"{table_prefix}.activity_metrics"
         ),
+        activity_segments=BigQueryActivitySegmentStore(
+            bigquery_client, f"{table_prefix}.activity_segment_metrics"
+        ),
+        route_fingerprints=BigQueryRouteFingerprintStore(
+            bigquery_client, f"{table_prefix}.activity_route_fingerprints"
+        ),
+        route_comparisons=BigQueryRouteComparisonStore(
+            bigquery_client, f"{table_prefix}.activity_route_comparisons"
+        ),
+        route_hasher=RouteFingerprintHasher(settings.route_fingerprint_key),
         activity_ingestion_state=FirestoreActivityIngestionStateStore(firestore_client),
         activity_contexts=FirestoreActivityContextStore(firestore_client),
         condition_prompts=line,
