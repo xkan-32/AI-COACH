@@ -1,4 +1,5 @@
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
@@ -143,6 +144,16 @@ def test_settings_api_rejects_unauthenticated_request() -> None:
     from app.main import app
 
     assert TestClient(app).get("/settings/profile/api").status_code == 401
+
+
+def test_settings_page_has_mobile_goal_controls() -> None:
+    page = (Path(__file__).parents[1] / "app/static/profile-settings.html").read_text()
+
+    assert "＋ 主目標を登録" in page
+    assert "＋ 副目標を追加" in page
+    assert "主目標に設定" in page
+    assert "input:not([type=radio]):not([type=checkbox])" in page
+    assert "input[type=date]{min-height:46px" in page
 
 
 def test_settings_link_is_signed_expires_and_does_not_expose_user_id() -> None:
