@@ -311,6 +311,70 @@ CREATE TABLE IF NOT EXISTS `training_coach.readiness_assessments` (
 PARTITION BY DATE(created_at)
 CLUSTER BY user_id, planned_workout_id;
 
+CREATE TABLE IF NOT EXISTS `training_coach.plan_change_requests` (
+  id STRING NOT NULL,
+  user_id STRING NOT NULL,
+  line_user_id STRING NOT NULL,
+  base_plan_id STRING NOT NULL,
+  base_plan_version INT64 NOT NULL,
+  scope STRING NOT NULL,
+  effective_date DATE NOT NULL,
+  reason_code STRING NOT NULL,
+  requested_adjustment STRING NOT NULL,
+  note STRING,
+  readiness_assessment_id STRING,
+  operation_id STRING NOT NULL,
+  created_at TIMESTAMP NOT NULL
+)
+PARTITION BY DATE(created_at)
+CLUSTER BY user_id, base_plan_id;
+
+CREATE TABLE IF NOT EXISTS `training_coach.plan_revision_proposals` (
+  id STRING NOT NULL,
+  request_id STRING NOT NULL,
+  user_id STRING NOT NULL,
+  line_user_id STRING NOT NULL,
+  base_plan_id STRING NOT NULL,
+  base_plan_version INT64 NOT NULL,
+  proposed_plan_id STRING NOT NULL,
+  proposed_plan_version INT64 NOT NULL,
+  proposed_plan JSON NOT NULL,
+  proposed_workouts JSON NOT NULL,
+  revision INT64 NOT NULL,
+  scope STRING NOT NULL,
+  effective_date DATE NOT NULL,
+  readiness_assessment_id STRING,
+  changed_workout_ids ARRAY<STRING>,
+  safety_flags ARRAY<STRING>,
+  diff JSON NOT NULL,
+  supersedes_proposal_id STRING,
+  rule_version STRING NOT NULL,
+  ai_model STRING,
+  prompt_version STRING NOT NULL,
+  input_snapshot_digest STRING NOT NULL,
+  operation_id STRING NOT NULL,
+  created_at TIMESTAMP NOT NULL
+)
+PARTITION BY DATE(created_at)
+CLUSTER BY user_id, base_plan_id;
+
+CREATE TABLE IF NOT EXISTS `training_coach.plan_revision_decisions` (
+  id STRING NOT NULL,
+  proposal_id STRING NOT NULL,
+  proposal_revision INT64 NOT NULL,
+  request_id STRING NOT NULL,
+  user_id STRING NOT NULL,
+  line_user_id STRING NOT NULL,
+  base_plan_id STRING NOT NULL,
+  base_plan_version INT64 NOT NULL,
+  decision STRING NOT NULL,
+  approval_event_id STRING,
+  operation_id STRING NOT NULL,
+  decided_at TIMESTAMP NOT NULL
+)
+PARTITION BY DATE(decided_at)
+CLUSTER BY user_id, base_plan_id;
+
 CREATE TABLE IF NOT EXISTS `training_coach.publication_drafts` (
   id STRING NOT NULL,
   athlete_id STRING NOT NULL,

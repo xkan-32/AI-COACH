@@ -448,6 +448,94 @@ resource "google_bigquery_table" "readiness_assessments" {
   ])
 }
 
+resource "google_bigquery_table" "plan_change_requests" {
+  dataset_id          = google_bigquery_dataset.coach.dataset_id
+  table_id            = "plan_change_requests"
+  deletion_protection = true
+  time_partitioning {
+    type  = "DAY"
+    field = "created_at"
+  }
+  clustering = ["user_id", "base_plan_id"]
+  schema = jsonencode([
+    { name = "id", type = "STRING", mode = "REQUIRED" },
+    { name = "user_id", type = "STRING", mode = "REQUIRED" },
+    { name = "line_user_id", type = "STRING", mode = "REQUIRED" },
+    { name = "base_plan_id", type = "STRING", mode = "REQUIRED" },
+    { name = "base_plan_version", type = "INTEGER", mode = "REQUIRED" },
+    { name = "scope", type = "STRING", mode = "REQUIRED" },
+    { name = "effective_date", type = "DATE", mode = "REQUIRED" },
+    { name = "reason_code", type = "STRING", mode = "REQUIRED" },
+    { name = "requested_adjustment", type = "STRING", mode = "REQUIRED" },
+    { name = "note", type = "STRING", mode = "NULLABLE" },
+    { name = "readiness_assessment_id", type = "STRING", mode = "NULLABLE" },
+    { name = "operation_id", type = "STRING", mode = "REQUIRED" },
+    { name = "created_at", type = "TIMESTAMP", mode = "REQUIRED" },
+  ])
+}
+
+resource "google_bigquery_table" "plan_revision_proposals" {
+  dataset_id          = google_bigquery_dataset.coach.dataset_id
+  table_id            = "plan_revision_proposals"
+  deletion_protection = true
+  time_partitioning {
+    type  = "DAY"
+    field = "created_at"
+  }
+  clustering = ["user_id", "base_plan_id"]
+  schema = jsonencode([
+    { name = "id", type = "STRING", mode = "REQUIRED" },
+    { name = "request_id", type = "STRING", mode = "REQUIRED" },
+    { name = "user_id", type = "STRING", mode = "REQUIRED" },
+    { name = "line_user_id", type = "STRING", mode = "REQUIRED" },
+    { name = "base_plan_id", type = "STRING", mode = "REQUIRED" },
+    { name = "base_plan_version", type = "INTEGER", mode = "REQUIRED" },
+    { name = "proposed_plan_id", type = "STRING", mode = "REQUIRED" },
+    { name = "proposed_plan_version", type = "INTEGER", mode = "REQUIRED" },
+    { name = "proposed_plan", type = "JSON", mode = "REQUIRED" },
+    { name = "proposed_workouts", type = "JSON", mode = "REQUIRED" },
+    { name = "revision", type = "INTEGER", mode = "REQUIRED" },
+    { name = "scope", type = "STRING", mode = "REQUIRED" },
+    { name = "effective_date", type = "DATE", mode = "REQUIRED" },
+    { name = "readiness_assessment_id", type = "STRING", mode = "NULLABLE" },
+    { name = "changed_workout_ids", type = "STRING", mode = "REPEATED" },
+    { name = "safety_flags", type = "STRING", mode = "REPEATED" },
+    { name = "diff", type = "JSON", mode = "REQUIRED" },
+    { name = "supersedes_proposal_id", type = "STRING", mode = "NULLABLE" },
+    { name = "rule_version", type = "STRING", mode = "REQUIRED" },
+    { name = "ai_model", type = "STRING", mode = "NULLABLE" },
+    { name = "prompt_version", type = "STRING", mode = "REQUIRED" },
+    { name = "input_snapshot_digest", type = "STRING", mode = "REQUIRED" },
+    { name = "operation_id", type = "STRING", mode = "REQUIRED" },
+    { name = "created_at", type = "TIMESTAMP", mode = "REQUIRED" },
+  ])
+}
+
+resource "google_bigquery_table" "plan_revision_decisions" {
+  dataset_id          = google_bigquery_dataset.coach.dataset_id
+  table_id            = "plan_revision_decisions"
+  deletion_protection = true
+  time_partitioning {
+    type  = "DAY"
+    field = "decided_at"
+  }
+  clustering = ["user_id", "base_plan_id"]
+  schema = jsonencode([
+    { name = "id", type = "STRING", mode = "REQUIRED" },
+    { name = "proposal_id", type = "STRING", mode = "REQUIRED" },
+    { name = "proposal_revision", type = "INTEGER", mode = "REQUIRED" },
+    { name = "request_id", type = "STRING", mode = "REQUIRED" },
+    { name = "user_id", type = "STRING", mode = "REQUIRED" },
+    { name = "line_user_id", type = "STRING", mode = "REQUIRED" },
+    { name = "base_plan_id", type = "STRING", mode = "REQUIRED" },
+    { name = "base_plan_version", type = "INTEGER", mode = "REQUIRED" },
+    { name = "decision", type = "STRING", mode = "REQUIRED" },
+    { name = "approval_event_id", type = "STRING", mode = "NULLABLE" },
+    { name = "operation_id", type = "STRING", mode = "REQUIRED" },
+    { name = "decided_at", type = "TIMESTAMP", mode = "REQUIRED" },
+  ])
+}
+
 resource "google_bigquery_table" "publication_drafts" {
   dataset_id          = google_bigquery_dataset.coach.dataset_id
   table_id            = "publication_drafts"

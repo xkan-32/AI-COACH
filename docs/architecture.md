@@ -91,7 +91,16 @@ BigQuery is used for immutable history and analysis. Firestore is used for OAuth
 - 次の`PlannedWorkout`は休養日を含めて順序どおり選び、同日Activityが増えるたびに`NextWorkoutReadinessAssessment`を新revisionとして追加する。
 - 体調未回答は`needs_information`、違和感・疲労は`with_adjustment`、痛み・運動中悪化は`blocked`とする。blockは後続AI判定や再評価で自動解除しない。
 - Vertex AIへ渡すsnapshotはID、予定処方、差分、列挙codeだけとし、GPS、生stream、route hash、Description、健康自由記述、部位自由記述を含めない。
-- 従来の翌日提案にはplan、予定、Reviewの参照を付ける。計画変更は行わず、変更案のversion化と承認はPL-01Fへ分離する。
+- 従来の翌日提案にはplan、予定、Reviewの参照を付ける。Readinessから変更が必要な場合も自動変更せず、PL-01Fの独立した変更案・承認境界へ渡す。
+
+## PL-01F 承認付き再計画
+
+- 実施中のplanをbaseとして、変更要求、AI変更案、ユーザー決定を別々のappend-only recordへ保存する。変更案を表示しただけではactive pointerを変えない。
+- 変更範囲は`next_day`、`from_date`、`remainder_week`を区別し、ユーザーtimezoneで開始済み・過去のメニューを固定する。新versionでは全メニューを複製し、変更対象だけ処方を差し替える。
+- AI入力は構造化した理由code、希望調整、対象処方、Readiness codeだけとし、変更理由の自由記述、健康自由記述、GPS、生stream、route hashを含めない。
+- AI出力後に対象範囲、重複、体調時の負荷上限、blocked対象の休養化を決定論的に再検証する。blockedは変更案の拒否でも解除しない。
+- 承認tokenはproposal ID・revision、base plan ID・version、所有者、decision、有効期限へ署名する。承認時だけ新しいTrainingPlanVersionをactive化し、拒否はbaseを維持、別案はproposal revisionを追加する。
+- BigQueryは`plan_change_requests`、`plan_revision_proposals`、`plan_revision_decisions`を監査履歴として保持し、Firestoreは現在操作可能なproposalと決定状態をtransactionで管理する。
 - `PlannedWorkout`は`planned`固定の不変な処方recordである。実施結果は`WorkoutExecutionState`、照合は`WorkoutReconciliation`、評価は`WorkoutReview`へ分離する。
 - 新規active化経路は`pending_approval -> active` eventを必須とする。Safety Gateの`blocked`は変更案の拒否で解除しない。
 

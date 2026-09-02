@@ -351,3 +351,45 @@ def test_progress_menu_opens_one_time_weekly_plan_and_approves() -> None:
         )
         assert approved.status_code == 200
         assert approved.json() == {"status": "active"}
+
+        reopened = client.post(
+            "/tasks/line/events",
+            json={
+                "event_key": "weekly-web-active-progress-event",
+                "event": {
+                    "type": "postback",
+                    "source": {"userId": user},
+                    "postback": {"data": "action=menu&version=1&target=progress"},
+                },
+            },
+        )
+        assert reopened.status_code == 200
+        active_url = runtime.messenger.weekly_plan_links[-1][1]
+        assert client.get(active_url).status_code == 200
+        active_dto = client.get("/weekly-plan/api")
+        assert active_dto.status_code == 200
+        assert active_dto.json()["revision"]["enabled"] is True
+        revision = client.post(
+            "/weekly-plan/api/revisions",
+            json={
+                "base_plan_id": body["plan"]["id"],
+                "scope": "next_day",
+                "reason_code": "schedule",
+                "requested_adjustment": "rest",
+                "note": "予定が変わりました",
+                "operation_id": "weekly-web-revision-1",
+            },
+        )
+        assert revision.status_code == 200
+        revision_body = revision.json()
+        assert revision_body["revision"] == 1
+        revised = client.post(
+            "/weekly-plan/api/revisions/decision",
+            json={
+                "proposal_id": revision_body["id"],
+                "decision": "approve",
+                "action_token": revision_body["actions"]["approve"],
+            },
+        )
+        assert revised.status_code == 200
+        assert revised.json() == {"status": "active"}

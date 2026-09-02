@@ -12,6 +12,7 @@
     ul{padding-left:20px}.actions{display:grid;gap:10px;grid-template-columns:1fr 1fr;margin-top:18px}.actions button{min-height:48px;border:0;border-radius:10px;font-size:1rem;font-weight:700}
     #approve{background:#247848;color:#fff}#reject{background:#f0e4e4;color:#7b2727}#repropose{grid-column:1/-1;background:#e7ebee;color:#24313a}
     button:disabled{opacity:.5}.error{color:#a02727}.notice{color:#195d39;font-weight:700}
+    label{display:block;margin:10px 0 4px;font-weight:700}select,input,textarea{box-sizing:border-box;width:100%;padding:10px;border:1px solid #b9c5bd;border-radius:8px;background:#fff;font:inherit}
   </style>
 </head>
 <body>
@@ -19,7 +20,7 @@
   <h1>週間トレーニング計画</h1>
   <div id="summary" class="card">読み込み中です…</div>
   <section id="days"></section>
-  <div class="card">
+  <div id="approval-card" class="card">
     <h2>計画全体への回答</h2>
     <p class="muted">承認した場合だけ、このversionが実施中の計画になります。</p>
     <div class="actions">
@@ -28,6 +29,20 @@
       <button id="repropose" type="button">別案を依頼</button>
     </div>
     <p id="result" aria-live="polite"></p>
+  </div>
+  <div id="revision-card" class="card" hidden>
+    <h2>計画の変更案を作る</h2>
+    <p class="muted">変更案は承認するまで実施中の計画へ反映されません。</p>
+    <label for="scope">変更範囲</label>
+    <select id="scope"><option value="next_day">翌日のみ</option><option value="from_date">指定日以降</option><option value="remainder_week">残りの週全体</option></select>
+    <label for="effective-date">指定日（指定日以降の場合）</label><input id="effective-date" type="date">
+    <label for="reason">変更理由</label>
+    <select id="reason"><option value="condition">体調・疲労</option><option value="weather">天候</option><option value="schedule">急な予定</option><option value="sleep">睡眠不足</option><option value="environment">環境・器具</option><option value="too_hard">難しすぎる</option><option value="too_easy">軽すぎる</option><option value="preference">別の運動を希望</option><option value="other">その他</option></select>
+    <label for="adjustment">希望する調整</label>
+    <select id="adjustment"><option value="reduce_load">負荷を下げる</option><option value="rest">休養へ変更</option><option value="indoor">屋内へ変更</option><option value="different_activity">別の種目へ変更</option></select>
+    <label for="revision-note">補足（任意）</label><textarea id="revision-note" maxlength="500" rows="3"></textarea>
+    <div class="actions"><button id="create-revision" type="button">変更案を作成</button></div>
+    <div id="revision-proposal"></div><p id="revision-result" aria-live="polite"></p>
   </div>
 </main>
 <script>
@@ -41,6 +56,8 @@ async function load(){
   state=await response.json(); const plan=state.plan;
   document.querySelector("#summary").innerHTML=`<div class="meta">version ${plan.version} / ${escapeHtml(plan.status)}</div><h2>週間の理由</h2><p>${escapeHtml(plan.rationale||"理由はありません。")}</p><h2>安全制約</h2><div>${list(plan.safety_constraints)}</div><h2>version差分</h2><div>${list(plan.version_changes)}</div>`;
   document.querySelector("#days").innerHTML=plan.days.map(day=>`<article class="card day"><h2>${escapeHtml(day.date)}</h2>${day.workouts.length?day.workouts.map(workout=>`<div><strong>${escapeHtml(workout.type)}</strong><p>${text(workout.start_time,"時刻指定なし")} / ${text(workout.duration_minutes,0)}分 / ${text(workout.distance_meters)}m / ${escapeHtml(workout.intensity)}</p><div>${list(workout.environment_ids)}</div><p>${escapeHtml(workout.rationale||"日次理由はありません。")}</p><div><span class="muted">安全制約:</span> ${list(workout.safety_constraints)}</div></div>`).join(""):'<p>休養またはメニューなし</p>'}<div><span class="muted">差分:</span> ${list(day.changes)}</div></article>`).join("");
+  document.querySelector("#approval-card").hidden=!state.approval;
+  document.querySelector("#revision-card").hidden=!(state.revision&&state.revision.enabled);
 }
 async function decide(decision){
   if(!state)return;
@@ -51,9 +68,27 @@ async function decide(decision){
   const labels={active:"承認しました。",rejected:"却下しました。",reproposal_requested:"別案の依頼を受け付けました。実生成は今後の対応です。",duplicate:"この回答は処理済みです。"};
   document.querySelector("#result").className="notice";document.querySelector("#result").textContent=labels[body.status]||"処理しました。";
 }
+function renderProposal(proposal){
+  const rows=proposal.diff.map(item=>`<div class="card"><strong>${escapeHtml(item.scheduled_date)}</strong><p>${escapeHtml(item.before.workout_type)} ${text(item.before.duration_minutes,0)}分 → ${escapeHtml(item.after.workout_type)} ${text(item.after.duration_minutes,0)}分</p><p>${escapeHtml(item.before.intensity)} → ${escapeHtml(item.after.intensity)}</p></div>`).join("");
+  document.querySelector("#revision-proposal").innerHTML=`<h2>変更案 revision ${proposal.revision}</h2>${rows}<div>${list(proposal.safety_flags)}</div><div class="actions"><button type="button" data-revision-decision="approve">変更案を承認</button><button type="button" data-revision-decision="reject">変更しない</button><button type="button" data-revision-decision="repropose">別案を依頼</button></div>`;
+  document.querySelectorAll("[data-revision-decision]").forEach(button=>button.addEventListener("click",()=>decideRevision(proposal,button.dataset.revisionDecision)));
+}
+async function createRevision(){
+  const payload={base_plan_id:state.plan.id,scope:document.querySelector("#scope").value,effective_date:document.querySelector("#effective-date").value||null,reason_code:document.querySelector("#reason").value,requested_adjustment:document.querySelector("#adjustment").value,note:document.querySelector("#revision-note").value,operation_id:crypto.randomUUID()};
+  const response=await fetch("/weekly-plan/api/revisions",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)});const body=await response.json();
+  if(!response.ok)throw new Error(body.detail||"変更案を作成できませんでした。");renderProposal(body);
+}
+async function decideRevision(proposal,decision){
+  document.querySelectorAll("button").forEach(button=>button.disabled=true);
+  const response=await fetch("/weekly-plan/api/revisions/decision",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({proposal_id:proposal.id,decision,action_token:proposal.actions[decision]})});const body=await response.json();
+  if(!response.ok){document.querySelector("#revision-result").className="error";document.querySelector("#revision-result").textContent=body.detail||"操作できませんでした。";return}
+  if(body.proposal){renderProposal(body.proposal);document.querySelectorAll("button").forEach(button=>button.disabled=false)}
+  const labels={active:"変更案を承認し、新しい計画を有効にしました。",rejected:"元の計画を維持します。",reproposal_requested:"別案を作成しました。",duplicate:"この回答は処理済みです。"};document.querySelector("#revision-result").className="notice";document.querySelector("#revision-result").textContent=labels[body.status]||"処理しました。";
+}
 document.querySelector("#approve").addEventListener("click",()=>decide("approve"));
 document.querySelector("#reject").addEventListener("click",()=>decide("reject"));
 document.querySelector("#repropose").addEventListener("click",()=>decide("repropose"));
+document.querySelector("#create-revision").addEventListener("click",()=>createRevision().catch(error=>{document.querySelector("#revision-result").className="error";document.querySelector("#revision-result").textContent=error.message}));
 load().catch(error=>{document.querySelector("#summary").className="card error";document.querySelector("#summary").textContent=error.message});
 </script>
 </body>

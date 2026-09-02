@@ -79,6 +79,18 @@ from app.plan_generation import (
     VertexWeeklyPlanGenerator,
     WeeklyPlanGenerator,
 )
+from app.plan_revision import (
+    BigQueryRevisionHistoryStore,
+    FirestoreRevisionApprovalStateStore,
+    InMemoryRevisionApprovalStateStore,
+    InMemoryRevisionHistoryStore,
+    LocalPlanRevisionGenerator,
+    PlanRevisionActionSigner,
+    PlanRevisionGenerator,
+    RevisionApprovalStateStore,
+    RevisionHistoryStore,
+    VertexPlanRevisionGenerator,
+)
 from app.planning import (
     ActivePlanPointerStore,
     BigQueryPlanningHistoryStore,
@@ -214,6 +226,10 @@ class Runtime:
     training_settings_history: TrainingSettingsHistoryStore
     weekly_plan_generator: WeeklyPlanGenerator
     readiness_generator: ReadinessGenerator
+    revision_generator: PlanRevisionGenerator
+    revision_history: RevisionHistoryStore
+    revision_approval_states: RevisionApprovalStateStore
+    revision_action_signer: PlanRevisionActionSigner
     plan_approval_states: PlanApprovalStateStore
     plan_action_signer: PlanActionSigner
     weekly_plan_links: WeeklyPlanLinkStore
@@ -278,6 +294,12 @@ def build_runtime(settings: Settings) -> Runtime:
             training_settings_history=training_settings,
             weekly_plan_generator=LocalWeeklyPlanGenerator(),
             readiness_generator=LocalReadinessGenerator(),
+            revision_generator=LocalPlanRevisionGenerator(),
+            revision_history=InMemoryRevisionHistoryStore(),
+            revision_approval_states=InMemoryRevisionApprovalStateStore(),
+            revision_action_signer=PlanRevisionActionSigner(
+                settings.oauth_state_signing_key
+            ),
             plan_approval_states=InMemoryPlanApprovalStateStore(),
             plan_action_signer=PlanActionSigner(settings.oauth_state_signing_key),
             weekly_plan_links=InMemoryWeeklyPlanLinkStore(),
@@ -405,6 +427,14 @@ def build_runtime(settings: Settings) -> Runtime:
         ),
         readiness_generator=VertexReadinessGenerator(
             genai_client, settings.vertex_model
+        ),
+        revision_generator=VertexPlanRevisionGenerator(
+            genai_client, settings.vertex_model
+        ),
+        revision_history=BigQueryRevisionHistoryStore(bigquery_client, table_prefix),
+        revision_approval_states=FirestoreRevisionApprovalStateStore(firestore_client),
+        revision_action_signer=PlanRevisionActionSigner(
+            settings.oauth_state_signing_key
         ),
         plan_approval_states=FirestorePlanApprovalStateStore(firestore_client),
         plan_action_signer=PlanActionSigner(settings.oauth_state_signing_key),
