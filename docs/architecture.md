@@ -29,7 +29,7 @@ Webhook handlers authenticate, normalize, enqueue, and acknowledge. Workers own 
 ## Data model
 
 - `users`: athlete identity, LINE link, timezone, consent status
-- `oauth_tokens`: encrypted/token-reference metadata only (prefer a transactional store for token rotation)
+- `strava_tokens`: AES-256-GCM encrypted access/refresh tokens and rotation metadata in Firestore
 - `activities`: immutable Strava activity snapshots
 - `condition_reports`: subjective condition and optional symptom detail
 - `goals`: primary/secondary goal, target, date, status
@@ -48,6 +48,7 @@ The model chooses within a bounded envelope. A deterministic policy can force re
 
 - Verify LINE HMAC signatures and Strava verification token/event shape.
 - Store provider secrets and token-encryption material in Secret Manager.
+- Bind encrypted Strava tokens to athlete ID, LINE user ID, and token type with authenticated additional data.
 - Use separate least-privilege service accounts for API and workers.
 - Do not log access tokens, raw authorization headers, or unnecessary health comments.
 - Sign approval postbacks, expire them, and bind them to athlete and proposal IDs.

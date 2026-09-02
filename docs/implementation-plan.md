@@ -19,21 +19,17 @@ The MVP supports one athlete first while retaining athlete IDs in every record. 
 
 Exit: local tests pass; no secrets are committed.
 
-### Phase 1 - Accounts, identity, and ingestion（実装済み、hardening継続）
+### Phase 1 - Accounts, identity, and ingestion（実装済み）
 
-- Create Strava OAuth authorization/callback and Firestore token storage
+- Create Strava OAuth authorization/callback and encrypted Firestore token storage
 - Refresh expired Strava access tokens and persist rotated token values
+- Validate OAuth session expiry on consumption and expire transient state with Firestore TTL
 - Link Strava athlete ID with LINE user ID
 - Validate and deduplicate webhook events
 - Fetch activity details and insert an immutable activity snapshot into BigQuery
 - Send the four-choice condition check in LINE
 
 Exit: a real Strava activity creates exactly one stored activity and one LINE prompt.
-
-残課題:
-
-- Firestoreへ保存するStrava tokenを暗号化または鍵管理された参照方式へ移行する
-- OAuth sessionの`expires_at`を消費時に検証し、TTLを設定する
 
 ### Phase 2 - Condition and coaching（コア実装済み）
 
@@ -79,6 +75,7 @@ Exit: only one approved proposal is appended, retries do not duplicate text.
 - Cloud Tasksのretry設定とOIDC付きworker呼び出し
 - TerraformとGitHub ActionsによるCI/CD
 - LINEリッチメニューの冪等同期
+- OAuth session、体調draft、Activity context、プロフィール一時データのFirestore TTL
 
 残課題:
 

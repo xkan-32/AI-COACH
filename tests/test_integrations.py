@@ -1,7 +1,10 @@
 import httpx
+import pytest
 
+from app.config import Settings
 from app.domain.events import StravaWebhookEvent
 from app.oauth_service import StravaOAuthService
+from app.runtime import build_runtime
 from app.state import InMemoryOAuthSessionStore, InMemoryStravaTokenStore
 from app.strava import StravaOAuthClient
 from app.tasks import (
@@ -9,6 +12,21 @@ from app.tasks import (
     CloudTasksLineEventPublisher,
     InMemoryActivityTaskPublisher,
 )
+
+
+def test_production_requires_token_encryption_key() -> None:
+    settings = Settings(
+        app_env="production",
+        gcp_project_id="project",
+        cloud_tasks_queue_path="projects/p/locations/r/queues/q",
+        worker_url="https://example.test",
+        task_service_account_email="tasks@example.test",
+        line_channel_access_token="line-secret",
+        token_encryption_key="",
+    )
+
+    with pytest.raises(RuntimeError, match="token_encryption_key"):
+        build_runtime(settings)
 
 
 async def test_oauth_exchange_is_saved_without_returning_tokens() -> None:

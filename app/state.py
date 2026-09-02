@@ -1,6 +1,13 @@
+from collections.abc import Callable
+from datetime import UTC, datetime
 from typing import Protocol
 
 from app.strava import StoredStravaToken
+from app.token_crypto import (
+    AesGcmTokenCipher,
+    EncryptedTokenValue,
+    TokenDecryptionError,
+)
 
 
 class EventStore(Protocol):
@@ -38,14 +45,19 @@ class InMemoryEventStore:
 
 
 class InMemoryOAuthSessionStore:
-    def __init__(self) -> None:
-        self._sessions: dict[str, str] = {}
+    def __init__(self, clock: Callable[[], datetime] | None = None) -> None:
+        self._clock = clock or (lambda: datetime.now(UTC))
+        self._sessions: dict[str, tuple[str, datetime]] = {}
 
     async def create(self, nonce: str, line_user_id: str, expires_at: int) -> None:
-        self._sessions[nonce] = line_user_id
+        self._sessions[nonce] = (line_user_id, _expiry_datetime(expires_at))
 
     async def consume(self, nonce: str) -> str | None:
-        return self._sessions.pop(nonce, None)
+        session = self._sessions.pop(nonce, None)
+        if session is None:
+            return None
+        line_user_id, expires_at = session
+        return line_user_id if expires_at > self._clock() else None
 
 
 class InMemoryStravaTokenStore:
@@ -91,14 +103,22 @@ class FirestoreEventStore:
 
 
 class FirestoreOAuthSessionStore:
-    def __init__(self, client: object) -> None:
+    def __init__(
+        self, client: object, clock: Callable[[], datetime] | None = None
+    ) -> None:
         self._client = client
+        self._clock = clock or (lambda: datetime.now(UTC))
 
     async def create(self, nonce: str, line_user_id: str, expires_at: int) -> None:
         await (
             self._client.collection("oauth_sessions")
             .document(nonce)
-            .create({"line_user_id": line_user_id, "expires_at": expires_at})
+            .create(
+                {
+                    "line_user_id": line_user_id,
+                    "expires_at": _expiry_datetime(expires_at),
+                }
+            )
         )
 
     async def consume(self, nonce: str) -> str | None:
@@ -113,14 +133,22 @@ class FirestoreOAuthSessionStore:
             if not snapshot.exists:
                 return None
             txn.delete(document)
+            expires_at = _expiry_datetime(snapshot.get("expires_at"))
+            if expires_at <= self._clock():
+                return None
             return snapshot.get("line_user_id")
 
         return await consume_once(transaction)
 
 
 class FirestoreStravaTokenStore:
-    def __init__(self, client: object) -> None:
+    def __init__(self, client: object, cipher: AesGcmTokenCipher) -> None:
         self._client = client
+        self._cipher = cipher
+
+    @staticmethod
+    def _associated_data(athlete_id: str, line_user_id: str, token_kind: str) -> str:
+        return f"strava-token:v1:{athlete_id}:{line_user_id}:{token_kind}"
 
     async def get(self, athlete_id: str) -> StoredStravaToken | None:
         snapshot = (
@@ -128,16 +156,69 @@ class FirestoreStravaTokenStore:
         )
         if not snapshot.exists:
             return None
-        return StoredStravaToken(**snapshot.to_dict())
+        values = snapshot.to_dict()
+        if values.get("athlete_id") != athlete_id:
+            raise TokenDecryptionError("Stored token athlete does not match document")
+        if "access_token" in values and "refresh_token" in values:
+            token = StoredStravaToken(**values)
+            await self.save(token)
+            return token
+
+        line_user_id = values.get("line_user_id")
+        version = values.get("token_encryption_version")
+        if not isinstance(line_user_id, str) or not isinstance(version, int):
+            raise TokenDecryptionError("Stored token encryption metadata is invalid")
+        access = EncryptedTokenValue(
+            ciphertext=values.get("access_token_ciphertext", ""),
+            nonce=values.get("access_token_nonce", ""),
+            version=version,
+        )
+        refresh = EncryptedTokenValue(
+            ciphertext=values.get("refresh_token_ciphertext", ""),
+            nonce=values.get("refresh_token_nonce", ""),
+            version=version,
+        )
+        return StoredStravaToken(
+            athlete_id=athlete_id,
+            line_user_id=line_user_id,
+            access_token=self._cipher.decrypt(
+                access,
+                self._associated_data(athlete_id, line_user_id, "access"),
+            ),
+            refresh_token=self._cipher.decrypt(
+                refresh,
+                self._associated_data(athlete_id, line_user_id, "refresh"),
+            ),
+            expires_at=values["expires_at"],
+        )
 
     async def save(self, token: StoredStravaToken) -> None:
         document = self._client.collection("strava_tokens").document(token.athlete_id)
+        access = self._cipher.encrypt(
+            token.access_token,
+            self._associated_data(token.athlete_id, token.line_user_id, "access"),
+        )
+        refresh = self._cipher.encrypt(
+            token.refresh_token,
+            self._associated_data(token.athlete_id, token.line_user_id, "refresh"),
+        )
         await document.set(
             {
                 "athlete_id": token.athlete_id,
                 "line_user_id": token.line_user_id,
-                "access_token": token.access_token,
-                "refresh_token": token.refresh_token,
                 "expires_at": token.expires_at,
+                "token_encryption_version": access.version,
+                "access_token_ciphertext": access.ciphertext,
+                "access_token_nonce": access.nonce,
+                "refresh_token_ciphertext": refresh.ciphertext,
+                "refresh_token_nonce": refresh.nonce,
             }
         )
+
+
+def _expiry_datetime(value: int | datetime) -> datetime:
+    if isinstance(value, datetime):
+        if value.tzinfo is None:
+            return value.replace(tzinfo=UTC)
+        return value.astimezone(UTC)
+    return datetime.fromtimestamp(value, tz=UTC)
