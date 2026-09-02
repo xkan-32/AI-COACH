@@ -23,8 +23,8 @@ jobs:
           python-version: "3.12"
           cache: pip
       - run: pip install -e '.[dev,gcp]'
-      - run: ruff check app tests
-      - run: ruff format --check app tests
+      - run: ruff check app tests scripts
+      - run: ruff format --check app tests scripts
       - run: pytest -q
 
   deploy:
@@ -48,6 +48,12 @@ jobs:
           service_account: ${{ vars.WIF_SERVICE_ACCOUNT }}
           token_format: access_token
       - uses: google-github-actions/setup-gcloud@v2
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install rich-menu sync dependencies
+        run: pip install -e .
       - uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: "1.9.8"
@@ -66,3 +72,8 @@ jobs:
           -backend-config="prefix=application"
       - name: Terraform apply
         run: terraform -chdir=infra/terraform apply -auto-approve -input=false -lock-timeout=5m
+      - name: Synchronize LINE rich menu
+        run: |
+          token="$(gcloud secrets versions access latest --secret=line-channel-access-token)"
+          echo "::add-mask::${token}"
+          LINE_CHANNEL_ACCESS_TOKEN="${token}" python3 scripts/sync-line-rich-menu.py

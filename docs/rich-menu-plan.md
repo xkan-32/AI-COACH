@@ -16,7 +16,7 @@
 | リッチメニュー画像・領域 | RM-01実装済み | 2500×1686 PNG、編集用SVG、6領域JSON |
 | Rich Menu API同期 | RM-02実装済み | content hashによる冪等同期、dry-run、失敗時cleanup |
 | メニューaction処理 | RM-03実装済み | Cloud Tasks worker内で6領域を案内へrouting |
-| CI/CD・IaC連携 | 未実装 | デプロイ時の同期処理なし |
+| CI/CD・IaC連携 | RM-04実装済み | Terraform apply成功後に本番メニューを冪等同期 |
 | 状態別メニュー | 未実装 | 未連携／連携済みの切替なし |
 
 Quick ReplyとButtons Templateは対話UIだが、画面下部に常設されるリッチメニューとは別機能である。
@@ -73,7 +73,35 @@ python3 scripts/sync-line-rich-menu.py --dry-run
 ```
 
 実同期は`--dry-run`を外す。本番tokenをコマンドライン引数、設定JSON、ログ、Terraform変数へ渡してはならない。
-RM-04のGitHub Actions統合および本番アカウントへの同期は本セッションの対象外である。
+GitHub Actionsでは本番deploy用WIFでSecret Managerからtokenを実行時に取得し、maskして同期processだけへ渡す。GitHub SecretsやTerraform stateへtokenを複製しない。同期はTerraform apply成功後に実行し、APIエラー時はdeploy workflowを失敗させる。
+
+## 初回反映の手動手順
+
+本番LINEアカウントへの反映自体は、次の準備とmainへのmergeによって行う。token値をIssue、PR、GitHub Actions variable、Terraform tfvars、shell履歴へ記録しないこと。
+
+1. LINE Developers Consoleで対象Messaging API channelのChannel Access Tokenを発行する。
+2. ローカル端末からtokenを標準入力でGCP Secret Managerへ追加する。
+
+   ```bash
+   gcloud secrets versions add line-channel-access-token --data-file=-
+   ```
+
+   コマンド実行後にtokenを貼り付け、Ctrl-Dで確定する。
+3. production GitHub Environmentのrequired reviewer、main限定deployment rule、`GCP_PROJECT_ID`、`WIF_PROVIDER`、`WIF_SERVICE_ACCOUNT`等が`docs/bootstrap-and-cicd.md`どおり設定済みか確認する。
+4. 本番変更前にローカルから読み取り専用dry-runを実行する。tokenは秘密ストアからshell変数へ一時取得し、コマンド終了後にunsetする。
+
+   ```bash
+   read -rsp "LINE Channel Access Token: " LINE_CHANNEL_ACCESS_TOKEN
+   export LINE_CHANNEL_ACCESS_TOKEN
+   python3 scripts/sync-line-rich-menu.py --dry-run
+   unset LINE_CHANNEL_ACCESS_TOKEN
+   ```
+
+5. PRをmainへmergeする。`Deploy` workflowのproduction承認後、アプリ・Terraformの反映に成功した場合だけrich menu同期が実行される。
+6. Actions logで`create`、`upload-image`、`set-default`を確認する。再実行時は`already-synchronized`となることを確認する。tokenそのものがlogに表示された場合は直ちにtokenを失効・再発行する。
+7. LINEスマートフォンアプリでトークを開き直し、6領域の表示・境界・応答を確認する。PC版LINEではrich menuは表示されない。
+
+rollbackする場合は、直前commitをrevertしてmainへmergeする。旧画像の定義が復元されればcontent hashが変わり、同じ同期手順で旧版を新規作成・既定化して現行版を削除する。
 
 ### メニュー押下時の動作
 

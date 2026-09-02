@@ -213,7 +213,7 @@ The workflows behave as follows:
 
 - `ci.yml`: test, lint, format check, Terraform validation.
 - `terraform-plan.yml`: PR plan using a read-only WIF identity. Fork PRs do not receive WIF access, and plan does not lock or write state.
-- `deploy.yml`: after merge/push to `main`, build and push an immutable image, then run a complete Terraform apply. WIF impersonation for this identity is restricted to `refs/heads/main`.
+- `deploy.yml`: after merge/push to `main`, build and push an immutable image, run a complete Terraform apply, then synchronize the LINE rich menu. WIF impersonation for this identity is restricted to `refs/heads/main`. The workflow reads the Channel Access Token directly from Secret Manager at runtime, masks it, and never stores it in GitHub variables or Terraform state.
 
 ## Manual items that remain
 

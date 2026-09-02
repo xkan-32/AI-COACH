@@ -18,13 +18,17 @@ from app.line_menu import (
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="LINEリッチメニューを冪等に同期します。")
+    parser = argparse.ArgumentParser(
+        description="LINEリッチメニューを冪等に同期します。"
+    )
     parser.add_argument(
         "--config",
         type=Path,
         default=REPOSITORY_ROOT / "config/line-rich-menu/rich-menu-v1.json",
     )
-    parser.add_argument("--dry-run", action="store_true", help="変更予定だけを表示します。")
+    parser.add_argument(
+        "--dry-run", action="store_true", help="変更予定だけを表示します。"
+    )
     return parser.parse_args()
 
 
@@ -32,7 +36,10 @@ async def main() -> int:
     args = parse_args()
     token = os.environ.get("LINE_CHANNEL_ACCESS_TOKEN", "")
     if not token:
-        print("LINE_CHANNEL_ACCESS_TOKEN environment variable is required", file=sys.stderr)
+        print(
+            "LINE_CHANNEL_ACCESS_TOKEN environment variable is required",
+            file=sys.stderr,
+        )
         return 2
     definition = load_rich_menu_definition(args.config.resolve())
     actions = await sync_rich_menu(

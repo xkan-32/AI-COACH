@@ -138,7 +138,12 @@ def validate_rich_menu_payload(payload: dict[str, Any]) -> None:
         if x + area_width > width or y + area_height > height:
             raise RichMenuDefinitionError("area exceeds image boundaries")
         for left, top, right, bottom in rectangles:
-            if x < right and x + area_width > left and y < bottom and y + area_height > top:
+            if (
+                x < right
+                and x + area_width > left
+                and y < bottom
+                and y + area_height > top
+            ):
                 raise RichMenuDefinitionError("areas must not overlap")
         rectangles.append((x, y, x + area_width, y + area_height))
         action = area.get("action", {})
@@ -162,7 +167,10 @@ class LineRichMenuApi:
                 response = await client.request(
                     method,
                     url,
-                    headers={"Authorization": f"Bearer {self._token}", **kwargs.pop("headers", {})},
+                    headers={
+                        "Authorization": f"Bearer {self._token}",
+                        **kwargs.pop("headers", {}),
+                    },
                     **kwargs,
                 )
                 response.raise_for_status()
@@ -176,16 +184,23 @@ class LineRichMenuApi:
 
     async def get_default(self) -> str | None:
         try:
-            response = await self._request("GET", f"{self.api_base}/v2/bot/user/all/richmenu")
+            response = await self._request(
+                "GET", f"{self.api_base}/v2/bot/user/all/richmenu"
+            )
         except RichMenuApiError as exc:
             cause = exc.__cause__
-            if isinstance(cause, httpx.HTTPStatusError) and cause.response.status_code == 404:
+            if (
+                isinstance(cause, httpx.HTTPStatusError)
+                and cause.response.status_code == 404
+            ):
                 return None
             raise
         return str(response.json().get("richMenuId", "")) or None
 
     async def create(self, payload: dict[str, Any]) -> str:
-        response = await self._request("POST", f"{self.api_base}/v2/bot/richmenu", json=payload)
+        response = await self._request(
+            "POST", f"{self.api_base}/v2/bot/richmenu", json=payload
+        )
         rich_menu_id = str(response.json().get("richMenuId", ""))
         if not rich_menu_id:
             raise RichMenuApiError("LINE Rich Menu API returned no richMenuId")
@@ -200,7 +215,9 @@ class LineRichMenuApi:
         )
 
     async def set_default(self, rich_menu_id: str) -> None:
-        await self._request("POST", f"{self.api_base}/v2/bot/user/all/richmenu/{rich_menu_id}")
+        await self._request(
+            "POST", f"{self.api_base}/v2/bot/user/all/richmenu/{rich_menu_id}"
+        )
 
     async def delete(self, rich_menu_id: str) -> None:
         await self._request("DELETE", f"{self.api_base}/v2/bot/richmenu/{rich_menu_id}")
@@ -221,7 +238,8 @@ async def sync_rich_menu(
     menus = await api.list_menus()
     matches = [menu for menu in menus if menu.get("name") == definition.managed_name]
     stale = [
-        menu for menu in menus
+        menu
+        for menu in menus
         if str(menu.get("name", "")).startswith(MANAGED_NAME_PREFIX)
         and menu.get("name") != definition.managed_name
     ]

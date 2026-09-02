@@ -43,7 +43,9 @@ async def test_non_menu_postback_is_not_consumed() -> None:
         ("action=menu&version=1&target=unknown", "確認できませんでした"),
     ],
 )
-async def test_invalid_menu_action_has_user_facing_error(data: str, message: str) -> None:
+async def test_invalid_menu_action_has_user_facing_error(
+    data: str, message: str
+) -> None:
     with pytest.raises(MenuActionError, match=message):
         await MenuActionRouter(InMemoryConditionPromptSender()).handle("U123", data)
 

@@ -17,9 +17,7 @@ def test_line_event_worker_routes_every_rich_menu_action(target: str) -> None:
             "event": {
                 "type": "postback",
                 "source": {"userId": "U-menu"},
-                "postback": {
-                    "data": f"action=menu&version=1&target={target}"
-                },
+                "postback": {"data": f"action=menu&version=1&target={target}"},
             },
         },
     )
