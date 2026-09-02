@@ -461,6 +461,8 @@ AI実行前に制約を作り、AI出力後にも同じ制約で検証する。�
 
 ### PL-01A ドメイン契約と設定基盤
 
+実装済み。実装model、Firestore/BigQuery境界、旧Planning Foundationからのmigration方針は`docs/next-session-pl-01a.md`を参照する。
+
 - user主体、timezone、週境界を定義する。
 - plan lifecycle、安全ゲート、照合状態のenumと遷移を実装する。
 - WeeklyAvailability、AvailabilitySlot、WorkoutPreference、DatedWorkoutRequestを実装する。

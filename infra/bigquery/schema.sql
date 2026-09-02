@@ -88,10 +88,12 @@ CLUSTER BY athlete_id, metric_quality;
 
 CREATE TABLE IF NOT EXISTS `training_coach.training_plan_versions` (
   id STRING NOT NULL,
-  athlete_id STRING NOT NULL,
-  line_user_id STRING NOT NULL,
+  user_id STRING,
+  athlete_id STRING,
+  line_user_id STRING,
   week_start DATE NOT NULL,
   version INT64 NOT NULL,
+  status STRING,
   goal_snapshot JSON NOT NULL,
   change_reason STRING NOT NULL,
   supersedes_plan_version_id STRING,
@@ -107,7 +109,8 @@ CLUSTER BY athlete_id, week_start;
 CREATE TABLE IF NOT EXISTS `training_coach.planned_workouts` (
   id STRING NOT NULL,
   plan_version_id STRING NOT NULL,
-  athlete_id STRING NOT NULL,
+  user_id STRING,
+  athlete_id STRING,
   scheduled_date DATE NOT NULL,
   sequence INT64 NOT NULL,
   workout_type STRING NOT NULL,
@@ -116,6 +119,8 @@ CREATE TABLE IF NOT EXISTS `training_coach.planned_workouts` (
   target_intensity STRING NOT NULL,
   environment_ids ARRAY<STRING>,
   safety_constraints ARRAY<STRING>,
+  workout_lineage_id STRING,
+  supersedes_planned_workout_id STRING,
   status STRING NOT NULL,
   created_at TIMESTAMP NOT NULL
 )
@@ -126,7 +131,8 @@ CREATE TABLE IF NOT EXISTS `training_coach.workout_reconciliations` (
   id STRING NOT NULL,
   plan_version_id STRING NOT NULL,
   planned_workout_id STRING NOT NULL,
-  athlete_id STRING NOT NULL,
+  user_id STRING,
+  athlete_id STRING,
   source_type STRING NOT NULL,
   activity_id STRING,
   status STRING NOT NULL,
@@ -145,7 +151,8 @@ CREATE TABLE IF NOT EXISTS `training_coach.workout_reviews` (
   plan_version_id STRING NOT NULL,
   planned_workout_id STRING NOT NULL,
   reconciliation_id STRING,
-  athlete_id STRING NOT NULL,
+  user_id STRING,
+  athlete_id STRING,
   achievement_status STRING NOT NULL,
   objective_factors ARRAY<STRING>,
   condition_factors ARRAY<STRING>,
@@ -159,6 +166,130 @@ CREATE TABLE IF NOT EXISTS `training_coach.workout_reviews` (
 )
 PARTITION BY DATE(created_at)
 CLUSTER BY athlete_id, plan_version_id;
+
+CREATE TABLE IF NOT EXISTS `training_coach.user_training_profile_versions` (
+  user_id STRING NOT NULL,
+  timezone STRING NOT NULL,
+  week_starts_on INT64 NOT NULL,
+  weekly_generation_local_time TIME NOT NULL,
+  provider_athlete_id STRING,
+  experience_level STRING,
+  notifications_enabled BOOL NOT NULL,
+  quiet_hours_start TIME,
+  quiet_hours_end TIME,
+  version INT64 NOT NULL,
+  operation_id STRING NOT NULL,
+  updated_at TIMESTAMP NOT NULL
+)
+PARTITION BY DATE(updated_at)
+CLUSTER BY user_id;
+
+CREATE TABLE IF NOT EXISTS `training_coach.weekly_availability_versions` (
+  id STRING NOT NULL,
+  user_id STRING NOT NULL,
+  timezone STRING NOT NULL,
+  version INT64 NOT NULL,
+  slots JSON NOT NULL,
+  overrides JSON NOT NULL,
+  supersedes_version_id STRING,
+  operation_id STRING NOT NULL,
+  created_at TIMESTAMP NOT NULL
+)
+PARTITION BY DATE(created_at)
+CLUSTER BY user_id;
+
+CREATE TABLE IF NOT EXISTS `training_coach.workout_preferences` (
+  id STRING NOT NULL,
+  user_id STRING NOT NULL,
+  version INT64 NOT NULL,
+  preference_type STRING NOT NULL,
+  value JSON NOT NULL,
+  strength STRING NOT NULL,
+  source STRING NOT NULL,
+  confidence FLOAT64,
+  evidence_event_ids ARRAY<STRING>,
+  confirmation_status STRING NOT NULL,
+  expires_at TIMESTAMP,
+  supersedes_preference_id STRING,
+  operation_id STRING NOT NULL,
+  created_at TIMESTAMP NOT NULL
+)
+PARTITION BY DATE(created_at)
+CLUSTER BY user_id, source;
+
+CREATE TABLE IF NOT EXISTS `training_coach.dated_workout_requests` (
+  id STRING NOT NULL,
+  user_id STRING NOT NULL,
+  local_date DATE NOT NULL,
+  request_type STRING NOT NULL,
+  value JSON NOT NULL,
+  priority INT64 NOT NULL,
+  status STRING NOT NULL,
+  operation_id STRING NOT NULL,
+  expires_at TIMESTAMP,
+  created_at TIMESTAMP NOT NULL
+)
+PARTITION BY local_date
+CLUSTER BY user_id, status;
+
+CREATE TABLE IF NOT EXISTS `training_coach.training_plan_lifecycle_events` (
+  id STRING NOT NULL,
+  user_id STRING NOT NULL,
+  plan_version_id STRING NOT NULL,
+  from_status STRING NOT NULL,
+  to_status STRING NOT NULL,
+  reason_code STRING NOT NULL,
+  operation_id STRING NOT NULL,
+  occurred_at TIMESTAMP NOT NULL
+)
+PARTITION BY DATE(occurred_at)
+CLUSTER BY user_id, plan_version_id;
+
+CREATE TABLE IF NOT EXISTS `training_coach.workout_execution_states` (
+  id STRING NOT NULL,
+  user_id STRING NOT NULL,
+  plan_version_id STRING NOT NULL,
+  planned_workout_id STRING NOT NULL,
+  revision INT64 NOT NULL,
+  status STRING NOT NULL,
+  source_reconciliation_ids ARRAY<STRING>,
+  supersedes_execution_state_id STRING,
+  operation_id STRING NOT NULL,
+  recorded_at TIMESTAMP NOT NULL
+)
+PARTITION BY DATE(recorded_at)
+CLUSTER BY user_id, planned_workout_id;
+
+CREATE TABLE IF NOT EXISTS `training_coach.safety_gate_results` (
+  id STRING NOT NULL,
+  user_id STRING NOT NULL,
+  planned_workout_id STRING,
+  status STRING NOT NULL,
+  reason_codes ARRAY<STRING>,
+  rule_version STRING NOT NULL,
+  input_snapshot_digest STRING NOT NULL,
+  evaluated_at TIMESTAMP NOT NULL
+)
+PARTITION BY DATE(evaluated_at)
+CLUSTER BY user_id, status;
+
+CREATE TABLE IF NOT EXISTS `training_coach.readiness_assessments` (
+  id STRING NOT NULL,
+  user_id STRING NOT NULL,
+  local_date DATE NOT NULL,
+  planned_workout_id STRING NOT NULL,
+  revision INT64 NOT NULL,
+  status STRING NOT NULL,
+  safety_gate_result_id STRING NOT NULL,
+  reason_codes ARRAY<STRING>,
+  referenced_review_ids ARRAY<STRING>,
+  supersedes_assessment_id STRING,
+  rule_version STRING NOT NULL,
+  input_snapshot_digest STRING NOT NULL,
+  created_at TIMESTAMP NOT NULL
+)
+PARTITION BY DATE(created_at)
+CLUSTER BY user_id, planned_workout_id;
 
 CREATE TABLE IF NOT EXISTS `training_coach.publication_drafts` (
   id STRING NOT NULL,

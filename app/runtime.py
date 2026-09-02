@@ -63,10 +63,15 @@ from app.line import InMemoryConditionPromptSender, LineConditionPromptSender
 from app.planning import (
     ActivePlanPointerStore,
     BigQueryPlanningHistoryStore,
+    BigQueryTrainingSettingsHistoryStore,
     FirestoreActivePlanPointerStore,
+    FirestoreTrainingSettingsStateStore,
     InMemoryActivePlanPointerStore,
     InMemoryPlanningHistoryStore,
+    InMemoryTrainingSettingsStore,
     PlanningHistoryStore,
+    TrainingSettingsHistoryStore,
+    TrainingSettingsStateStore,
 )
 from app.profile import (
     FirestoreGoalStore,
@@ -156,6 +161,8 @@ class Runtime:
     settings_links: SettingsLinkStore
     planning_history: PlanningHistoryStore
     active_plan_pointers: ActivePlanPointerStore
+    training_settings_state: TrainingSettingsStateStore
+    training_settings_history: TrainingSettingsHistoryStore
     publication_history: PublicationHistoryStore
     publication_states: PublicationApprovalStateStore
     publication_signer: PublicationActionSigner
@@ -168,6 +175,7 @@ def build_runtime(settings: Settings) -> Runtime:
         proposal_states = InMemoryProposalStateStore()
         goals = InMemoryGoalStore()
         training_resources = InMemoryTrainingResourceStore()
+        training_settings = InMemoryTrainingSettingsStore()
         return Runtime(
             events=InMemoryEventStore(),
             oauth_sessions=InMemoryOAuthSessionStore(),
@@ -203,6 +211,8 @@ def build_runtime(settings: Settings) -> Runtime:
             settings_links=InMemorySettingsLinkStore(),
             planning_history=InMemoryPlanningHistoryStore(),
             active_plan_pointers=InMemoryActivePlanPointerStore(),
+            training_settings_state=training_settings,
+            training_settings_history=training_settings,
             publication_history=InMemoryPublicationHistoryStore(),
             publication_states=InMemoryPublicationApprovalStateStore(),
             publication_signer=PublicationActionSigner(
@@ -305,6 +315,10 @@ def build_runtime(settings: Settings) -> Runtime:
         settings_links=FirestoreSettingsLinkStore(firestore_client),
         planning_history=BigQueryPlanningHistoryStore(bigquery_client, table_prefix),
         active_plan_pointers=FirestoreActivePlanPointerStore(firestore_client),
+        training_settings_state=FirestoreTrainingSettingsStateStore(firestore_client),
+        training_settings_history=BigQueryTrainingSettingsHistoryStore(
+            bigquery_client, table_prefix
+        ),
         publication_history=BigQueryPublicationHistoryStore(
             bigquery_client, table_prefix
         ),
