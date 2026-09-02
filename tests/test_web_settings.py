@@ -36,12 +36,24 @@ async def test_firestore_settings_link_reads_through_client_transaction() -> Non
         def __init__(self) -> None:
             self.updated = False
             self.committed = False
+            self._id = None
+            self._read_only = False
+            self._max_attempts = 1
+
+        def _clean_up(self) -> None:
+            self._id = None
+
+        async def _begin(self, retry_id=None) -> None:
+            self._id = b"transaction-id"
 
         def update(self, document, values) -> None:
             self.updated = values["used_at"] == now
 
-        async def commit(self) -> None:
+        async def _commit(self) -> None:
             self.committed = True
+
+        async def _rollback(self) -> None:
+            pass
 
     class Document:
         pass
