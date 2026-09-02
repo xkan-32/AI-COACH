@@ -133,11 +133,16 @@ PF-01の対象外:
 
 ### PL-01 計画
 
+週間計画、Activity実績、Workout Review、次の予定メニューのReadiness、承認付き再計画をアプリの中心feedback loopとする。詳細な設計原則、状態遷移、data model、実装段階、必須テストは`docs/weekly-training-plan-vision.md`を正本とする。
+
 - 長期、週間、日次の階層とversion、変更理由を保持する。
 - 大会日あり、期限なし、複数目標の優先ruleをtestする。
 - 週間version、goal snapshot、日次メニュー、active pointerの基盤は実装済み。PL-01ではAI生成と長期計画を接続する。
 - 再計画でも過去versionを上書きしない。
 - AI失敗時は最後の安全な計画を利用する。
+- 実装はPL-01A（ドメイン契約・設定基盤）、PL-01B（週間生成）、PL-01C（計画画面・初回承認）、PL-01D（実績照合）、PL-01E（Review・Readiness）、PL-01F（承認付き再計画）へ分割する。
+- 計画の所有主体はapp userとし、Strava未連携・手動Activityのみでも利用可能にする。
+- 安全上`blocked`となった元メニューは、ユーザーが代替案を拒否しても実施可能扱いへ戻さない。
 
 ### AN-01 負荷・回復・症状分析
 
