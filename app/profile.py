@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import uuid
+from collections.abc import Awaitable, Callable
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, date, datetime, timedelta
 from typing import Protocol
@@ -86,6 +87,7 @@ class ProfileMessenger(Protocol):
     async def send_quick_reply(
         self, line_user_id: str, text: str, choices: list[tuple[str, str]]
     ) -> None: ...
+    async def send_settings_link(self, line_user_id: str, url: str) -> None: ...
 
 
 def profile_action(section: str, operation: str, **values: str) -> str:
@@ -495,22 +497,27 @@ class ProfileWorkflow:
         drafts: ProfileDraftStore,
         messenger: ProfileMessenger,
         clock=lambda: datetime.now(UTC),
+        on_settings_requested: Callable[[str], Awaitable[None]] | None = None,
     ) -> None:
         self._goals = goals
         self._resources = resources
         self._drafts = drafts
         self._messenger = messenger
         self._clock = clock
+        self._on_settings_requested = on_settings_requested
         self._commands = ProfileCommandService(goals, resources, messenger)
 
     async def handle_postback(self, line_user_id: str, data: str) -> bool:
         values = {key: items[0] for key, items in parse_qs(data).items() if items}
         if values.get("action") == "menu" and values.get("version") == "1":
             if values.get("target") == "goals":
-                await self._show_goal_menu(line_user_id)
+                await self._commands.handle(line_user_id, "目標確認")
                 return True
             if values.get("target") == "settings":
-                await self._show_settings_menu(line_user_id)
+                if self._on_settings_requested is None:
+                    await self._show_settings_menu(line_user_id)
+                else:
+                    await self._on_settings_requested(line_user_id)
                 return True
             return False
         if values.get("action") != "profile":

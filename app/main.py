@@ -1,9 +1,12 @@
 import logging
-from urllib.parse import parse_qs
+import uuid
+from datetime import UTC, date, datetime
+from pathlib import Path
+from urllib.parse import parse_qs, quote
 
 from fastapi import FastAPI, HTTPException, Query, Request, Response
-from fastapi.responses import RedirectResponse
-from pydantic import ValidationError
+from fastapi.responses import FileResponse, RedirectResponse
+from pydantic import BaseModel, Field, ValidationError, model_validator
 
 from app.approval import (
     ApprovalService,
@@ -15,12 +18,26 @@ from app.coaching import CoachingService
 from app.condition import ConditionWorkflow, InvalidConditionAction
 from app.config import get_settings
 from app.domain.events import StravaWebhookEvent
-from app.domain.models import CoachingContext
+from app.domain.models import (
+    CoachingContext,
+    Goal,
+    GoalPriority,
+    TrainingEnvironment,
+    TrainingEnvironmentCategory,
+)
 from app.ingestion import ActivityIngestionService, UnknownAthleteToken
 from app.line_menu import MenuActionError, MenuActionRouter
 from app.oauth import InvalidOAuthState, OAuthStateSigner, strava_authorization_url
 from app.oauth_service import StravaOAuthService, UnknownOAuthSession
-from app.profile import ProfileCommandError, ProfileWorkflow
+from app.profile import (
+    ACTIVITY_PLACES,
+    ENVIRONMENT_ALIASES,
+    EQUIPMENT,
+    GOAL_TYPES,
+    MAX_ITEMS,
+    ProfileCommandError,
+    ProfileWorkflow,
+)
 from app.runtime import build_runtime
 from app.security import (
     ApprovalActionError,
@@ -28,12 +45,103 @@ from app.security import (
     verify_cloud_task_request,
 )
 from app.strava import StravaApiError, StravaOAuthClient, StravaOAuthError
+from app.web_settings import InvalidSettingsToken, SettingsTokenSigner
 from app.webhooks import verify_line_signature
 
 logger = logging.getLogger(__name__)
 
 app = FastAPI(title="AI Training Coach", version="0.3.0")
 runtime = build_runtime(get_settings())
+SETTINGS_COOKIE = "profile_settings_session"
+SETTINGS_PAGE = Path(__file__).parent / "static" / "profile-settings.html"
+
+
+class GoalInput(BaseModel):
+    id: str | None = None
+    goal_type: str = Field(min_length=1, max_length=50)
+    target: str = Field(min_length=1, max_length=200)
+    target_date: date | None = None
+    priority: GoalPriority
+
+
+class EnvironmentInput(BaseModel):
+    id: str | None = None
+    display_name: str = Field(min_length=1, max_length=100)
+    category: TrainingEnvironmentCategory
+    detail: str | None = Field(default=None, max_length=200)
+
+
+class ProfileSettingsInput(BaseModel):
+    goals: list[GoalInput] = Field(max_length=MAX_ITEMS)
+    training_environments: list[EnvironmentInput] = Field(max_length=MAX_ITEMS)
+
+    @model_validator(mode="after")
+    def validate_profile(self) -> "ProfileSettingsInput":
+        if (
+            self.goals
+            and sum(goal.priority == GoalPriority.PRIMARY for goal in self.goals) != 1
+        ):
+            raise ValueError("目標を登録する場合、主目標を1件選択してください。")
+        if any(goal.goal_type not in GOAL_TYPES for goal in self.goals):
+            raise ValueError("未対応の目標種別です。")
+        keys: set[tuple[str, str]] = set()
+        for item in self.training_environments:
+            name = ENVIRONMENT_ALIASES.get(
+                item.display_name.strip(), item.display_name.strip()
+            )
+            expected = (
+                TrainingEnvironmentCategory.ACTIVITY_PLACE
+                if name in ACTIVITY_PLACES
+                else TrainingEnvironmentCategory.EQUIPMENT
+                if name in EQUIPMENT
+                else TrainingEnvironmentCategory.OTHER
+            )
+            if item.category != expected:
+                raise ValueError("運動環境の区分が表示名と一致しません。")
+            key = (item.category.value, name)
+            if key in keys:
+                raise ValueError("同じ運動環境が重複しています。")
+            keys.add(key)
+        return self
+
+
+def _settings_signer() -> SettingsTokenSigner:
+    return SettingsTokenSigner(get_settings().oauth_state_signing_key)
+
+
+def _settings_user(request: Request) -> str:
+    token = request.cookies.get(SETTINGS_COOKIE, "")
+    try:
+        return _settings_signer().verify_session(token)
+    except InvalidSettingsToken as exc:
+        raise HTTPException(
+            status_code=401, detail="設定ページをLINEから開き直してください。"
+        ) from exc
+
+
+def _check_settings_origin(request: Request) -> None:
+    configured = get_settings().worker_url.rstrip("/")
+    origin = request.headers.get("origin", "").rstrip("/")
+    if configured and origin != configured:
+        raise HTTPException(status_code=403, detail="Invalid origin")
+
+
+async def create_profile_settings_url(line_user_id: str) -> str:
+    settings = get_settings()
+    base_url = settings.worker_url or (
+        "http://testserver" if settings.app_env == "local" else ""
+    )
+    if not base_url:
+        raise ProfileCommandError("設定ページは現在利用できません。")
+    token, link = _settings_signer().create_link(line_user_id)
+    await runtime.settings_links.create(link)
+    return f"{base_url.rstrip('/')}/settings/profile/start?token={quote(token)}"
+
+
+async def send_profile_settings_link(line_user_id: str) -> None:
+    await runtime.messenger.send_settings_link(
+        line_user_id, await create_profile_settings_url(line_user_id)
+    )
 
 
 async def create_strava_authorization_url(line_user_id: str) -> str:
@@ -51,6 +159,125 @@ async def create_strava_authorization_url(line_user_id: str) -> str:
 @app.get("/healthz", include_in_schema=False)
 async def health() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@app.get("/settings/profile/start")
+async def start_profile_settings(token: str) -> RedirectResponse:
+    try:
+        nonce = _settings_signer().verify_link(token)
+    except InvalidSettingsToken as exc:
+        raise HTTPException(
+            status_code=400, detail="設定リンクが無効か期限切れです。"
+        ) from exc
+    line_user_id = await runtime.settings_links.consume(nonce, datetime.now(UTC))
+    if line_user_id is None:
+        raise HTTPException(status_code=400, detail="設定リンクが無効か使用済みです。")
+    response = RedirectResponse("/settings/profile", status_code=303)
+    response.set_cookie(
+        SETTINGS_COOKIE,
+        _settings_signer().create_session(line_user_id),
+        max_age=30 * 60,
+        httponly=True,
+        secure=get_settings().app_env != "local",
+        samesite="strict",
+        path="/settings/profile",
+    )
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+@app.get("/settings/profile", response_class=FileResponse)
+async def profile_settings_page(request: Request) -> FileResponse:
+    _settings_user(request)
+    response = FileResponse(SETTINGS_PAGE, media_type="text/html")
+    response.headers.update(
+        {
+            "Cache-Control": "no-store",
+            "Content-Security-Policy": (
+                "default-src 'self'; style-src 'self' 'unsafe-inline'; "
+                "script-src 'self' 'unsafe-inline'; img-src 'self' data:; "
+                "frame-ancestors 'none'; base-uri 'none'"
+            ),
+            "X-Frame-Options": "DENY",
+            "X-Content-Type-Options": "nosniff",
+        }
+    )
+    return response
+
+
+@app.get("/settings/profile/api")
+async def get_profile_settings(request: Request) -> dict[str, object]:
+    line_user_id = _settings_user(request)
+    return {
+        "goals": [
+            goal.model_dump(mode="json")
+            for goal in await runtime.goals.list(line_user_id)
+        ],
+        "training_environments": [
+            item.model_dump(mode="json")
+            for item in await runtime.training_resources.list(line_user_id)
+        ],
+        "options": {
+            "goal_types": list(GOAL_TYPES),
+            "activity_places": sorted(ACTIVITY_PLACES),
+            "equipment": sorted(EQUIPMENT),
+        },
+    }
+
+
+@app.put("/settings/profile/api")
+async def update_profile_settings(
+    request: Request, payload: ProfileSettingsInput
+) -> dict[str, str]:
+    line_user_id = _settings_user(request)
+    _check_settings_origin(request)
+    current_goals = {goal.id: goal for goal in await runtime.goals.list(line_user_id)}
+    current_environments = {
+        item.id: item for item in await runtime.training_resources.list(line_user_id)
+    }
+    supplied_goal_ids = {item.id for item in payload.goals if item.id}
+    supplied_environment_ids = {
+        item.id for item in payload.training_environments if item.id
+    }
+    if (
+        not supplied_goal_ids <= current_goals.keys()
+        or not supplied_environment_ids <= current_environments.keys()
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail="設定が更新されています。ページを開き直してください。",
+        )
+
+    for goal_id in current_goals.keys() - supplied_goal_ids:
+        await runtime.goals.deactivate(line_user_id, goal_id)
+    for item in payload.goals:
+        await runtime.goals.save(
+            line_user_id,
+            Goal(
+                id=item.id or str(uuid.uuid4()),
+                goal_type=item.goal_type,
+                target=item.target.strip(),
+                target_date=item.target_date,
+                priority=item.priority,
+            ),
+        )
+
+    for resource_id in current_environments.keys() - supplied_environment_ids:
+        await runtime.training_resources.deactivate(line_user_id, resource_id)
+    for item in payload.training_environments:
+        display_name = ENVIRONMENT_ALIASES.get(
+            item.display_name.strip(), item.display_name.strip()
+        )
+        await runtime.training_resources.save(
+            line_user_id,
+            TrainingEnvironment(
+                id=item.id or str(uuid.uuid4()),
+                display_name=display_name,
+                category=item.category,
+                detail=item.detail.strip() if item.detail else None,
+            ),
+        )
+    return {"status": "saved"}
 
 
 @app.get("/webhooks/strava")
@@ -238,6 +465,7 @@ async def process_line_event(event: dict) -> None:
         runtime.training_resources,
         runtime.profile_drafts,
         runtime.messenger,
+        on_settings_requested=send_profile_settings_link,
     )
     menu_actions = MenuActionRouter(runtime.messenger)
     event_type = event.get("type")

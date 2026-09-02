@@ -19,7 +19,7 @@ LINE approval -> Cloud Run API -> Cloud Tasks -> approval worker
                                          `-> Strava Description update
 
 LINE rich menu -> LINE webhook -> Cloud Tasks -> LINE event worker
-                                              `-> menu action router -> guidance
+                                              `-> settings -> signed one-time web link
 ```
 
 Webhook handlers authenticate, normalize, enqueue, and acknowledge. Workers own external calls and retries. The initial code keeps orchestration in one deployable service; it can be split without changing domain models.
@@ -57,8 +57,10 @@ The model chooses within a bounded envelope. A deterministic policy can force re
 - `goals/{goal_id}` は所有者、主/副、種別、内容、任意期限、`active/paused` を保持する。storeはAI contextへ有効項目だけを返し、主目標の保存時に既存主目標を副目標へ変更する。
 - `training_environments/{environment_id}` は安定ID、所有者、表示名、`activity_place/equipment/other`、`active/inactive`、任意詳細を保持する。旧`training_resources/{line_user_id}.resources`は構造化documentがない場合だけ読み取る。
 - `profile_drafts/{line_user_id}` は操作ID、action、step、途中値、`expires_at`を保持する。`expires_at`はFirestore TTL対象で、アプリ側でも期限を検証する。
+- `profile_settings_links/{nonce}` はLINEユーザーに紐づく10分間有効な設定リンクを保持する。nonceは署名され、Firestore transactionで一度だけ消費し、`expires_at`をTTL対象にする。URLへLINEユーザーIDは含めない。
 - 会話の最終保存IDにはdraftの操作IDを使う。同じCloud Taskが保存後に再送されても同じdocumentを上書きするため、追加が重複しない。
 - 未定義の運動環境は`other`と詳細へそのまま保持し、推測で既知区分へ分類しない。健康情報や入力本文をapplication logへ出さない。
-- リッチメニューの`goals`と`settings`は既存LINE worker内でPF-01 workflowを開始する。Webhookの署名検証、event予約、Cloud Tasks enqueue、即時200応答は変更しない。
-- PF-01の通常操作は`action=profile` postbackとQuick Replyを利用する。postbackには操作種別、安定ID、既知選択値だけを含め、自由記述や健康情報は含めない。テキストコマンドは後方互換経路として残す。
+- リッチメニューの`goals`は有効目標の一覧表示だけを行う。`settings`は既存LINE workerで署名・期限付きワンタイムURLを発行し、同じCloud Run上の設定ページへのURIボタンを送る。LIFF／LINE Loginチャネルは不要である。Webhookの署名検証、event予約、Cloud Tasks enqueue、即時200応答は変更しない。
+- 設定ページはワンタイムURLをHttpOnly・Secure・SameSite=Strictの30分セッションcookieへ交換する。保存APIはcookieとOriginを検証し、既存IDの所有者を確認してから目標・運動環境を更新する。
+- 旧`action=profile`会話とテキストコマンドは後方互換経路として残す。通常の編集導線は設定Webページとし、自由記述や健康情報をapplication logへ出さない。
 - 運動環境の複数選択中は`profile_drafts.values.selected`へJSON配列として途中保存する。完了時はdraft operation IDと正規化keyから決定的なdocument IDを生成し、Task再送時も同じ項目を重複作成しない。
