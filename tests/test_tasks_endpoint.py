@@ -276,6 +276,20 @@ def test_missing_workout_scan_prompts_and_is_idempotent(monkeypatch) -> None:
     assert dict(prompt[2]).keys() == {"未実施", "同期待ち", "予定変更"}
 
 
+def test_readiness_task_rejects_owner_mismatch() -> None:
+    response = client.post(
+        "/tasks/plans/evaluate-readiness",
+        json={
+            "user_id": "U-owner",
+            "line_user_id": "U-other",
+            "activity_id": "activity-readiness-1",
+            "operation_id": "readiness-task-1",
+        },
+    )
+
+    assert response.status_code == 403
+
+
 def test_missing_workout_postback_records_user_decision(monkeypatch) -> None:
     decisions = []
 

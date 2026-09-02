@@ -164,6 +164,7 @@ CREATE TABLE IF NOT EXISTS `training_coach.workout_reviews` (
   plan_version_id STRING NOT NULL,
   planned_workout_id STRING NOT NULL,
   reconciliation_id STRING,
+  activity_id STRING,
   user_id STRING,
   athlete_id STRING,
   achievement_status STRING NOT NULL,
@@ -175,6 +176,8 @@ CREATE TABLE IF NOT EXISTS `training_coach.workout_reviews` (
   ai_model STRING,
   prompt_version STRING,
   input_snapshot JSON NOT NULL,
+  supersedes_review_id STRING,
+  operation_id STRING,
   created_at TIMESTAMP NOT NULL
 )
 PARTITION BY DATE(created_at)
@@ -295,9 +298,13 @@ CREATE TABLE IF NOT EXISTS `training_coach.readiness_assessments` (
   status STRING NOT NULL,
   safety_gate_result_id STRING NOT NULL,
   reason_codes ARRAY<STRING>,
+  display_reason STRING,
   referenced_review_ids ARRAY<STRING>,
   supersedes_assessment_id STRING,
   rule_version STRING NOT NULL,
+  ai_model STRING,
+  prompt_version STRING,
+  operation_id STRING,
   input_snapshot_digest STRING NOT NULL,
   created_at TIMESTAMP NOT NULL
 )

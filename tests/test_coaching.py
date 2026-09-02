@@ -80,6 +80,30 @@ async def test_coaching_service_saves_then_sends_safe_proposal() -> None:
     assert sender.proposal_publish_flags == [True]
 
 
+async def test_coaching_service_links_planned_workout_and_preserves_rest() -> None:
+    class Generator:
+        async def generate(self, activity, report, context):
+            return unsafe_output()
+
+    proposals = InMemoryProposalStore()
+    sender = InMemoryConditionPromptSender()
+    proposal = await CoachingService(Generator(), proposals, sender).create_proposal(
+        activity(),
+        report(ConditionLevel.GOOD),
+        "line-user",
+        plan_version_id="plan-1",
+        planned_workout_id="workout-1",
+        review_id="review-1",
+        force_rest=True,
+    )
+
+    assert proposal.plan_version_id == "plan-1"
+    assert proposal.planned_workout_id == "workout-1"
+    assert proposal.review_id == "review-1"
+    assert proposal.intensity == "rest"
+    assert proposal.duration_minutes == 0
+
+
 def test_coaching_input_contains_metrics_but_no_raw_location_data() -> None:
     context = CoachingContext(
         recent_activities=[activity()],
@@ -110,6 +134,24 @@ def test_coaching_input_contains_metrics_but_no_raw_location_data() -> None:
     assert "latlng" not in str(payload)
     assert "stream_points" not in str(payload)
     assert "route_hash" not in str(payload)
+
+
+def test_coaching_input_excludes_activity_and_health_free_text() -> None:
+    actual = activity().model_copy(
+        update={"description": "private activity note", "details": "private detail"}
+    )
+    condition = report(ConditionLevel.DISCOMFORT).model_copy(
+        update={"body_part": "private body part", "comment": "private health note"}
+    )
+
+    payload = build_coaching_input(actual, condition, CoachingContext())
+
+    serialized = str(payload)
+    assert "private" not in serialized
+    assert "description" not in serialized
+    assert "details" not in serialized
+    assert "body_part" not in serialized
+    assert "comment" not in serialized
 
 
 def test_legacy_workout_proposal_has_nullable_planning_links() -> None:

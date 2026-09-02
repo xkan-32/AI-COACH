@@ -238,6 +238,7 @@ resource "google_bigquery_table" "workout_reviews" {
     { name = "plan_version_id", type = "STRING", mode = "REQUIRED" },
     { name = "planned_workout_id", type = "STRING", mode = "REQUIRED" },
     { name = "reconciliation_id", type = "STRING", mode = "NULLABLE" },
+    { name = "activity_id", type = "STRING", mode = "NULLABLE" },
     { name = "user_id", type = "STRING", mode = "NULLABLE" },
     { name = "athlete_id", type = "STRING", mode = "NULLABLE" },
     { name = "achievement_status", type = "STRING", mode = "REQUIRED" },
@@ -249,6 +250,8 @@ resource "google_bigquery_table" "workout_reviews" {
     { name = "ai_model", type = "STRING", mode = "NULLABLE" },
     { name = "prompt_version", type = "STRING", mode = "NULLABLE" },
     { name = "input_snapshot", type = "JSON", mode = "REQUIRED" },
+    { name = "supersedes_review_id", type = "STRING", mode = "NULLABLE" },
+    { name = "operation_id", type = "STRING", mode = "NULLABLE" },
     { name = "created_at", type = "TIMESTAMP", mode = "REQUIRED" },
   ])
 }
@@ -433,9 +436,13 @@ resource "google_bigquery_table" "readiness_assessments" {
     { name = "status", type = "STRING", mode = "REQUIRED" },
     { name = "safety_gate_result_id", type = "STRING", mode = "REQUIRED" },
     { name = "reason_codes", type = "STRING", mode = "REPEATED" },
+    { name = "display_reason", type = "STRING", mode = "NULLABLE" },
     { name = "referenced_review_ids", type = "STRING", mode = "REPEATED" },
     { name = "supersedes_assessment_id", type = "STRING", mode = "NULLABLE" },
     { name = "rule_version", type = "STRING", mode = "REQUIRED" },
+    { name = "ai_model", type = "STRING", mode = "NULLABLE" },
+    { name = "prompt_version", type = "STRING", mode = "NULLABLE" },
+    { name = "operation_id", type = "STRING", mode = "NULLABLE" },
     { name = "input_snapshot_digest", type = "STRING", mode = "REQUIRED" },
     { name = "created_at", type = "TIMESTAMP", mode = "REQUIRED" },
   ])
