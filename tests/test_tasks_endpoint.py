@@ -276,3 +276,26 @@ def test_line_event_worker_starts_weight_from_condition_menu() -> None:
     )
     assert start.status_code == 200
     assert "今日の体重をkgで送ってください" in runtime.messenger.quick_replies[-1][1]
+
+
+def test_line_event_worker_completes_when_line_send_fails(monkeypatch) -> None:
+    from app.line import LineApiError
+    from app.main import runtime
+
+    async def fail_send(*_args, **_kwargs):
+        raise LineApiError("LINE message failed", status_code=429)
+
+    monkeypatch.setattr(runtime.messenger, "send_quick_reply", fail_send)
+    response = client.post(
+        "/tasks/line/events",
+        json={
+            "event_key": "line-429",
+            "event": {
+                "type": "postback",
+                "source": {"userId": "U-line-429"},
+                "replyToken": "reply-429",
+                "postback": {"data": "action=menu&version=1&target=condition"},
+            },
+        },
+    )
+    assert response.status_code == 200
