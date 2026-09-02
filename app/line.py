@@ -75,6 +75,22 @@ class LineConditionPromptSender:
             {"type": "text", "text": text, "quickReply": {"items": items}},
         )
 
+    async def send_settings_link(self, line_user_id: str, url: str) -> None:
+        await self._push(
+            line_user_id,
+            {
+                "type": "template",
+                "altText": "目標と運動環境の設定ページを開きます。",
+                "template": {
+                    "type": "buttons",
+                    "text": "目標と運動環境をWebページで設定できます。",
+                    "actions": [
+                        {"type": "uri", "label": "設定ページを開く", "uri": url}
+                    ],
+                },
+            },
+        )
+
     async def send_proposal(self, line_user_id: str, proposal: WorkoutProposal) -> None:
         items = [
             {
@@ -138,6 +154,7 @@ class InMemoryConditionPromptSender:
         self.texts: list[tuple[str, str]] = []
         self.proposals: list[tuple[str, WorkoutProposal]] = []
         self.quick_replies: list[tuple[str, str, list[tuple[str, str]]]] = []
+        self.settings_links: list[tuple[str, str]] = []
 
     async def send(self, line_user_id: str, activity: Activity) -> None:
         self.sent.append((line_user_id, activity))
@@ -149,6 +166,9 @@ class InMemoryConditionPromptSender:
         self, line_user_id: str, text: str, choices: list[tuple[str, str]]
     ) -> None:
         self.quick_replies.append((line_user_id, text, choices))
+
+    async def send_settings_link(self, line_user_id: str, url: str) -> None:
+        self.settings_links.append((line_user_id, url))
 
     async def send_proposal(self, line_user_id: str, proposal: WorkoutProposal) -> None:
         self.proposals.append((line_user_id, proposal))

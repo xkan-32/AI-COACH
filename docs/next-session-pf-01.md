@@ -1,6 +1,6 @@
 # PF-01 次セッション引き継ぎ
 
-> 2026-09-02実装: 本文の設計に基づくPF-01会話workflow、構造化運動環境、Firestore draft TTL、AI context反映を`feat/pf-01-profile-training-environment`で実装した。デプロイ・本番反映は未実施。
+> 2026-09-02更新: PF-01の通常編集導線を、LIFFを使わない署名・期限付きWeb設定ページへ変更した。リッチメニューの「目標」は一覧表示専用、「設定」は目標・運動環境の編集ページを開く。旧会話workflowとテキストコマンドは後方互換として維持する。
 
 ## 目的
 
@@ -9,9 +9,9 @@ LINEリッチメニューの「設定」から、目標・プロフィール・�
 ## 現在地
 
 - RM-01〜04は本番反映・実機確認まで完了している。
-- `action=menu&version=1&target=settings`は現在、既存テキストコマンドを案内する。
-- `app/profile.py`に目標と運動環境の登録・確認コマンドがある。
-- 運動環境は現在`list[str]`で全置換され、構造化区分、変更・無効化、会話stateは未実装である。
+- `action=menu&version=1&target=settings`は、LINE workerで10分間有効なワンタイムURLを発行する。
+- 設定ページは同じCloud Runから配信し、30分間のHttpOnly sessionで目標・運動環境を一括編集する。
+- 運動環境は安定ID、表示名、区分、有効状態、任意詳細を持つ。
 - 最新の目標・運動環境は`CoachingContext`を通じてAI提案へ渡される。
 
 ## 決定事項

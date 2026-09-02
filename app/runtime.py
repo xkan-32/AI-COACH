@@ -69,6 +69,11 @@ from app.tasks import (
     LineEventTaskPublisher,
     ProposalDecisionPublisher,
 )
+from app.web_settings import (
+    FirestoreSettingsLinkStore,
+    InMemorySettingsLinkStore,
+    SettingsLinkStore,
+)
 
 
 @dataclass(frozen=True)
@@ -93,6 +98,7 @@ class Runtime:
     goals: GoalStore
     training_resources: TrainingResourceStore
     profile_drafts: ProfileDraftStore
+    settings_links: SettingsLinkStore
 
 
 def build_runtime(settings: Settings) -> Runtime:
@@ -121,6 +127,7 @@ def build_runtime(settings: Settings) -> Runtime:
             goals=InMemoryGoalStore(),
             training_resources=InMemoryTrainingResourceStore(),
             profile_drafts=InMemoryProfileDraftStore(),
+            settings_links=InMemorySettingsLinkStore(),
         )
     required = {
         "gcp_project_id": settings.gcp_project_id,
@@ -190,4 +197,5 @@ def build_runtime(settings: Settings) -> Runtime:
         goals=FirestoreGoalStore(firestore_client),
         training_resources=FirestoreTrainingResourceStore(firestore_client),
         profile_drafts=FirestoreProfileDraftStore(firestore_client),
+        settings_links=FirestoreSettingsLinkStore(firestore_client),
     )
