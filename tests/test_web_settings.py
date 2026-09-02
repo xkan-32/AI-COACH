@@ -154,6 +154,8 @@ def test_settings_page_has_mobile_goal_controls() -> None:
     assert "主目標に設定" in page
     assert "input:not([type=radio]):not([type=checkbox])" in page
     assert "input[type=date]{min-height:46px" in page
+    assert "font-size:16px" in page
+    assert "maximum-scale" not in page
 
 
 def test_settings_link_is_signed_expires_and_does_not_expose_user_id() -> None:
