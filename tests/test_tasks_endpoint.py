@@ -134,3 +134,30 @@ def test_proposal_decision_sends_completion_message(monkeypatch) -> None:
         "line-user",
         "Stravaへの投稿が完了しました。",
     )
+
+
+def test_proposal_decision_records_manual_activity_without_strava(
+    monkeypatch,
+) -> None:
+    from app.main import runtime
+
+    async def fake_decide(self, task):
+        return "recorded"
+
+    monkeypatch.setattr("app.main.ApprovalService.decide", fake_decide)
+    runtime.messenger.texts.clear()
+
+    response = client.post(
+        "/tasks/proposals/decide",
+        json={
+            "proposal_id": "proposal-1",
+            "line_user_id": "line-user",
+            "decision": "approve",
+        },
+    )
+
+    assert response.status_code == 200
+    assert runtime.messenger.texts[-1] == (
+        "line-user",
+        "提案を記録しました。Stravaへは投稿していません。",
+    )

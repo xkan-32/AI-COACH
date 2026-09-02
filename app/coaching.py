@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 
 from app.domain.models import (
     Activity,
+    ActivitySource,
     ApprovalStatus,
     CoachingContext,
     ConditionLevel,
@@ -37,7 +38,11 @@ class ProposalStore(Protocol):
 
 class ProposalSender(Protocol):
     async def send_proposal(
-        self, line_user_id: str, proposal: WorkoutProposal
+        self,
+        line_user_id: str,
+        proposal: WorkoutProposal,
+        *,
+        publish_to_strava: bool = True,
     ) -> None: ...
 
 
@@ -152,7 +157,11 @@ class CoachingService:
             **generated.model_dump(),
         )
         await self._proposals.save(proposal, line_user_id)
-        await self._sender.send_proposal(line_user_id, proposal)
+        await self._sender.send_proposal(
+            line_user_id,
+            proposal,
+            publish_to_strava=activity.source_type != ActivitySource.LINE_MANUAL,
+        )
         return proposal
 
 
