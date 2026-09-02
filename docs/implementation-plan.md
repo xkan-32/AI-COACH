@@ -27,6 +27,7 @@ Exit: local tests pass; no secrets are committed.
 - Link Strava athlete ID with LINE user ID
 - Validate and deduplicate webhook events
 - Fetch activity details and insert an immutable activity snapshot into BigQuery
+- Fetch GPS-free laps/streams and persist versioned elevation, pace, heart-rate, cadence, and grade metrics
 - Send the four-choice condition check in LINE
 
 Exit: a real Strava activity creates exactly one stored activity and one LINE prompt.
@@ -36,6 +37,7 @@ Exit: a real Strava activity creates exactly one stored activity and one LINE pr
 - Parse LINE postbacks for good/fatigued/discomfort/pain
 - Ask body-part/severity follow-ups only for discomfort or pain
 - Query active goal and equipment context
+- Query recent Activity and Condition history and include safe derived metrics in coaching context
 - Call Vertex AI with a JSON response schema
 - Apply hard safety constraints before and validate them after generation
 - Persist prompt version, model, proposal output, and approval state
@@ -44,7 +46,6 @@ Exit: every supported response produces a valid, auditable next-day proposal.
 
 残課題:
 
-- BigQueryから直近ActivityとCondition履歴を取得し、`CoachingContext`へ渡す
 - AI入力snapshot、安全補正、処理結果を追跡できる監査証跡を完成させる
 
 ### Phase 2.5 - Profile and training environment（PF-01実装済み）

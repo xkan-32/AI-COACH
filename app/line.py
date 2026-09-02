@@ -1,3 +1,5 @@
+import uuid
+
 import httpx
 
 from app.domain.models import Activity, WorkoutProposal
@@ -47,6 +49,12 @@ class LineConditionPromptSender:
                 "text": "お疲れさまでした。今日の状態を教えてください。",
                 "quickReply": {"items": items},
             },
+            retry_key=str(
+                uuid.uuid5(
+                    uuid.NAMESPACE_URL,
+                    f"ai-coach:condition-prompt:{line_user_id}:{activity.id}",
+                )
+            ),
         )
 
     async def send_text(self, line_user_id: str, text: str) -> None:
@@ -132,15 +140,25 @@ class LineConditionPromptSender:
             ],
         )
 
-    async def _push(self, line_user_id: str, message: dict) -> None:
-        await self._push_many(line_user_id, [message])
+    async def _push(
+        self, line_user_id: str, message: dict, retry_key: str | None = None
+    ) -> None:
+        await self._push_many(line_user_id, [message], retry_key=retry_key)
 
-    async def _push_many(self, line_user_id: str, messages: list[dict]) -> None:
+    async def _push_many(
+        self,
+        line_user_id: str,
+        messages: list[dict],
+        retry_key: str | None = None,
+    ) -> None:
         try:
+            headers = {"Authorization": f"Bearer {self._token}"}
+            if retry_key is not None:
+                headers["X-Line-Retry-Key"] = retry_key
             async with httpx.AsyncClient(timeout=self._timeout) as client:
                 response = await client.post(
                     self.push_url,
-                    headers={"Authorization": f"Bearer {self._token}"},
+                    headers=headers,
                     json={"to": line_user_id, "messages": messages},
                 )
                 response.raise_for_status()

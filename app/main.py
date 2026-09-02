@@ -339,6 +339,10 @@ async def ingest_activity_task(
         runtime.activities,
         runtime.condition_prompts,
         runtime.activity_contexts,
+        runtime.activity_laps,
+        runtime.activity_streams,
+        runtime.activity_metrics,
+        runtime.activity_ingestion_state,
     )
     try:
         activity = await service.ingest(str(event.object_id), str(event.owner_id))
@@ -477,6 +481,13 @@ async def create_coaching_proposal(report) -> None:
     coaching_context = CoachingContext(
         goals=await runtime.goals.list(context.line_user_id),
         training_resources=await runtime.training_resources.list(context.line_user_id),
+        recent_activities=await runtime.activities.list_recent(
+            context.athlete_id, limit=10
+        ),
+        recent_conditions=await runtime.condition_reports.list_recent(
+            context.athlete_id, limit=10
+        ),
+        current_activity_metrics=await runtime.activity_metrics.get(report.activity_id),
     )
     try:
         await service.create_proposal(

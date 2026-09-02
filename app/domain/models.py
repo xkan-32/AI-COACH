@@ -64,6 +64,75 @@ class Activity(BaseModel):
     duration_seconds: int = Field(ge=0)
     distance_meters: float = Field(ge=0)
     description: str = ""
+    elapsed_seconds: int | None = Field(default=None, ge=0)
+    total_elevation_gain_meters: float | None = Field(default=None, ge=0)
+    average_speed_mps: float | None = Field(default=None, ge=0)
+    max_speed_mps: float | None = Field(default=None, ge=0)
+    has_heartrate: bool = False
+    average_heartrate_bpm: float | None = Field(default=None, ge=0)
+    max_heartrate_bpm: float | None = Field(default=None, ge=0)
+    average_cadence_per_minute: float | None = Field(default=None, ge=0)
+    suffer_score: float | None = Field(default=None, ge=0)
+    calories: float | None = Field(default=None, ge=0)
+
+
+class ActivityLap(BaseModel):
+    activity_id: str
+    athlete_id: str
+    activity_started_at: datetime | None = None
+    lap_index: int = Field(ge=0)
+    name: str = ""
+    elapsed_seconds: int = Field(ge=0)
+    moving_seconds: int = Field(ge=0)
+    distance_meters: float = Field(ge=0)
+    total_elevation_gain_meters: float | None = Field(default=None, ge=0)
+    average_speed_mps: float | None = Field(default=None, ge=0)
+    max_speed_mps: float | None = Field(default=None, ge=0)
+    average_heartrate_bpm: float | None = Field(default=None, ge=0)
+    max_heartrate_bpm: float | None = Field(default=None, ge=0)
+    average_cadence_per_minute: float | None = Field(default=None, ge=0)
+
+
+class ActivityStreamPoint(BaseModel):
+    activity_id: str
+    athlete_id: str
+    activity_started_at: datetime | None = None
+    sample_index: int = Field(ge=0)
+    time_seconds: int | None = Field(default=None, ge=0)
+    distance_meters: float | None = Field(default=None, ge=0)
+    altitude_meters: float | None = None
+    velocity_mps: float | None = Field(default=None, ge=0)
+    heartrate_bpm: float | None = Field(default=None, ge=0)
+    cadence_rpm: float | None = Field(default=None, ge=0)
+    watts: float | None = Field(default=None, ge=0)
+    temperature_celsius: float | None = None
+    moving: bool | None = None
+    grade_percent: float | None = None
+
+
+class ActivityMetrics(BaseModel):
+    activity_id: str
+    athlete_id: str
+    computation_version: str
+    metric_quality: str
+    quality_reasons: list[str] = Field(default_factory=list)
+    average_pace_seconds_per_km: float | None = Field(default=None, ge=0)
+    ascent_meters: float | None = Field(default=None, ge=0)
+    descent_meters: float | None = Field(default=None, ge=0)
+    uphill_seconds: int | None = Field(default=None, ge=0)
+    flat_seconds: int | None = Field(default=None, ge=0)
+    downhill_seconds: int | None = Field(default=None, ge=0)
+    uphill_meters: float | None = Field(default=None, ge=0)
+    flat_meters: float | None = Field(default=None, ge=0)
+    downhill_meters: float | None = Field(default=None, ge=0)
+    pace_variability_percent: float | None = Field(default=None, ge=0)
+    lap_pace_variability_percent: float | None = Field(default=None, ge=0)
+    average_heartrate_bpm: float | None = Field(default=None, ge=0)
+    max_heartrate_bpm: float | None = Field(default=None, ge=0)
+    heartrate_drift_percent: float | None = None
+    average_cadence_per_minute: float | None = Field(default=None, ge=0)
+    suffer_score: float | None = Field(default=None, ge=0)
+    computed_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
 class ConditionReport(BaseModel):
@@ -82,6 +151,7 @@ class CoachingContext(BaseModel):
     training_resources: list[TrainingEnvironment] = Field(default_factory=list)
     recent_activities: list[Activity] = Field(default_factory=list)
     recent_conditions: list[ConditionReport] = Field(default_factory=list)
+    current_activity_metrics: ActivityMetrics | None = None
 
 
 class WorkoutProposal(BaseModel):

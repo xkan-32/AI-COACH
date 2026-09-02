@@ -1,5 +1,19 @@
 from dataclasses import dataclass
 
+from app.activity_data import (
+    ActivityIngestionStateStore,
+    ActivityLapStore,
+    ActivityMetricsStore,
+    ActivityStreamStore,
+    BigQueryActivityLapStore,
+    BigQueryActivityMetricsStore,
+    BigQueryActivityStreamStore,
+    FirestoreActivityIngestionStateStore,
+    InMemoryActivityIngestionStateStore,
+    InMemoryActivityLapStore,
+    InMemoryActivityMetricsStore,
+    InMemoryActivityStreamStore,
+)
 from app.approval import (
     CompositeProposalStore,
     FirestoreProposalStateStore,
@@ -85,6 +99,10 @@ class Runtime:
     tasks: ActivityTaskPublisher
     line_tasks: LineEventTaskPublisher
     activities: ActivityStore
+    activity_laps: ActivityLapStore
+    activity_streams: ActivityStreamStore
+    activity_metrics: ActivityMetricsStore
+    activity_ingestion_state: ActivityIngestionStateStore
     activity_contexts: ActivityContextStore
     condition_prompts: ConditionPromptSender
     condition_drafts: ConditionDraftStore
@@ -114,6 +132,10 @@ def build_runtime(settings: Settings) -> Runtime:
             tasks=InMemoryActivityTaskPublisher(),
             line_tasks=InMemoryLineEventTaskPublisher(),
             activities=InMemoryActivityStore(),
+            activity_laps=InMemoryActivityLapStore(),
+            activity_streams=InMemoryActivityStreamStore(),
+            activity_metrics=InMemoryActivityMetricsStore(),
+            activity_ingestion_state=InMemoryActivityIngestionStateStore(),
             activity_contexts=InMemoryActivityContextStore(),
             condition_prompts=line,
             condition_drafts=InMemoryConditionDraftStore(),
@@ -180,6 +202,16 @@ def build_runtime(settings: Settings) -> Runtime:
             settings.task_service_account_email,
         ),
         activities=BigQueryActivityStore(bigquery_client, f"{table_prefix}.activities"),
+        activity_laps=BigQueryActivityLapStore(
+            bigquery_client, f"{table_prefix}.activity_laps"
+        ),
+        activity_streams=BigQueryActivityStreamStore(
+            bigquery_client, f"{table_prefix}.activity_stream_points"
+        ),
+        activity_metrics=BigQueryActivityMetricsStore(
+            bigquery_client, f"{table_prefix}.activity_metrics"
+        ),
+        activity_ingestion_state=FirestoreActivityIngestionStateStore(firestore_client),
         activity_contexts=FirestoreActivityContextStore(firestore_client),
         condition_prompts=line,
         condition_drafts=FirestoreConditionDraftStore(firestore_client),

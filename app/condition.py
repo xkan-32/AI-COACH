@@ -45,6 +45,9 @@ class ConditionDraftStore(Protocol):
 
 class ConditionReportStore(Protocol):
     async def save(self, report: ConditionReport) -> None: ...
+    async def list_recent(
+        self, athlete_id: str, limit: int
+    ) -> list[ConditionReport]: ...
 
 
 class FollowUpMessenger(Protocol):
@@ -215,6 +218,10 @@ class InMemoryConditionReportStore:
     async def save(self, report: ConditionReport) -> None:
         self.items.append(report)
 
+    async def list_recent(self, athlete_id: str, limit: int) -> list[ConditionReport]:
+        matches = [item for item in self.items if item.athlete_id == athlete_id]
+        return sorted(matches, key=lambda item: item.reported_at, reverse=True)[:limit]
+
 
 class FirestoreActivityContextStore:
     def __init__(self, client: object) -> None:
@@ -289,3 +296,33 @@ class BigQueryConditionReportStore:
         )
         if errors:
             raise RuntimeError("BigQuery condition report insert failed")
+
+    async def list_recent(self, athlete_id: str, limit: int) -> list[ConditionReport]:
+        from google.cloud import bigquery
+
+        query = (
+            f"SELECT * FROM `{self._table}` WHERE athlete_id = @athlete_id "
+            "ORDER BY reported_at DESC LIMIT @limit"
+        )
+        config = bigquery.QueryJobConfig(
+            query_parameters=[
+                bigquery.ScalarQueryParameter("athlete_id", "STRING", athlete_id),
+                bigquery.ScalarQueryParameter("limit", "INT64", limit),
+            ]
+        )
+        rows = await asyncio.to_thread(
+            lambda: list(self._client.query(query, job_config=config).result())
+        )
+        return [
+            ConditionReport(
+                athlete_id=row.athlete_id,
+                activity_id=row.activity_id,
+                level=ConditionLevel(row.condition_level),
+                body_part=row.body_part,
+                severity=row.severity,
+                worsened_during_activity=row.worsened_during_activity,
+                comment=row.comment or "",
+                reported_at=row.reported_at,
+            )
+            for row in rows
+        ]

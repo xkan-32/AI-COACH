@@ -36,11 +36,11 @@ Strava Webhook -> Cloud Tasks -> Activity取得・保存
 - 目標・運動環境のテキストコマンド
 - LINEリッチメニュー（RM-01〜04: UI、冪等同期、action router、CI/CD同期）
 - PF-01（構造化された目標・運動環境、会話UI、署名付きWeb設定ページ、AI context連携）
+- AC-01（Activity詳細、GPS非保存のLaps/Streams、versioned派生指標、直近履歴のAI context連携）
 
 未実装・拡張対象:
 
 - 状態別リッチメニュー（RM-05）
-- Laps/Streamsと詳細指標
 - 手動Activity、体重
 - 長期・週間・日次計画
 - 7日/30日負荷、連続症状分析
@@ -53,18 +53,18 @@ Strava Webhook -> Cloud Tasks -> Activity取得・保存
 |---:|---|---|---|
 | 完了 | RM-01〜04 | LINEリッチメニュー | 現行LINE worker |
 | 完了 | PF-01 | 目標・プロフィールUI | リッチメニュー |
-| 1 | AC-01 | Activity/Laps/Streams | Strava取得 |
-| 2 | MA-01 | 手動Activity | Activityモデル、メニュー |
-| 3 | WT-01 | 体重記録 | メニュー、データ基盤 |
-| 4 | PL-01 | 長期・週間・日次計画 | 目標、Activity、体重 |
-| 5 | AN-01 | 負荷・回復・症状分析 | 詳細履歴、計画 |
-| 6 | AI-01 | AI評価・提案拡張 | 分析、計画 |
-| 7 | AP-01 | 修正・承認UX | AI提案、承認基盤 |
-| 8 | NT-01 | 通知・リマインド | 設定、Scheduler/Tasks |
-| 9 | PR-01 | 進捗・週間レビュー | 計画、分析、体重 |
-| 10 | DS-01 | 同意・保持・削除 | 全store |
-| 11 | OP-01 | 監視・Alert・DLQ | 全worker |
-| 12 | E2E-01 | 総合E2E・障害試験 | 全MVP |
+| 完了 | AC-01 | Activity/Laps/Streams | Strava取得 |
+| 1 | MA-01 | 手動Activity | Activityモデル、メニュー |
+| 2 | WT-01 | 体重記録 | メニュー、データ基盤 |
+| 3 | PL-01 | 長期・週間・日次計画 | 目標、Activity、体重 |
+| 4 | AN-01 | 負荷・回復・症状分析 | 詳細履歴、計画 |
+| 5 | AI-01 | AI評価・提案拡張 | 分析、計画 |
+| 6 | AP-01 | 修正・承認UX | AI提案、承認基盤 |
+| 7 | NT-01 | 通知・リマインド | 設定、Scheduler/Tasks |
+| 8 | PR-01 | 進捗・週間レビュー | 計画、分析、体重 |
+| 9 | DS-01 | 同意・保持・削除 | 全store |
+| 10 | OP-01 | 監視・Alert・DLQ | 全worker |
+| 11 | E2E-01 | 総合E2E・障害試験 | 全MVP |
 
 リッチメニューは`docs/rich-menu-plan.md`を参照する。
 
@@ -99,13 +99,13 @@ PF-01の対象外:
 - 体重の登録・訂正・移動平均（WT-01）
 - Strava Manual Activityの作成および承認
 
-### AC-01 Activity/Laps/Streams
+### AC-01 Activity/Laps/Streams（完了）
 
-- Run、Ride、WeightTraining、Workout、Walk等を共通Activityとして扱う。
-- 必要なLaps/Streamsをrate limit内で取得する。
-- 生データと派生指標を分離し、再計算可能にする。
-- 位置情報の保存要否・精度・保持期間を明示する。
-- Webhook再送と部分失敗を冪等に再試行する。
+- Run、Ride、WeightTraining、Workout、Walk等を後方互換な共通Activityとして扱う。
+- Run、Walk、Ride系はLapsとGPSを除くStreamsを取得し、非対応種目はsummaryで処理する。
+- 生streamと`computation_version`付き派生指標を分離し、再計算可能にした。
+- GPS座標は要求・保存・ログ・AI送信を行わない。
+- Webhook／Task再送時の保存とLINE体調確認を冪等化し、直近Activity・Conditionと派生指標をAI contextへ渡す。
 
 ### MA-01 LINE手動Activity
 
