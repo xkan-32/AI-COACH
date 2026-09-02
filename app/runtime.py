@@ -149,6 +149,17 @@ from app.web_weekly_plan import (
     InMemoryWeeklyPlanLinkStore,
     WeeklyPlanLinkStore,
 )
+from app.weight import (
+    BigQueryWeightLogStore,
+    FirestoreWeightDraftStore,
+    FirestoreWeightTargetStore,
+    InMemoryWeightDraftStore,
+    InMemoryWeightLogStore,
+    InMemoryWeightTargetStore,
+    WeightDraftStore,
+    WeightLogStore,
+    WeightTargetStore,
+)
 
 
 @dataclass(frozen=True)
@@ -172,6 +183,9 @@ class Runtime:
     condition_drafts: ConditionDraftStore
     manual_activity_drafts: ManualActivityDraftStore
     manual_strava_publications: ManualStravaPublicationStore
+    weight_logs: WeightLogStore
+    weight_drafts: WeightDraftStore
+    weight_targets: WeightTargetStore
     condition_reports: ConditionReportStore
     messenger: FollowUpMessenger
     coach: CoachGenerator
@@ -230,6 +244,9 @@ def build_runtime(settings: Settings) -> Runtime:
             condition_drafts=InMemoryConditionDraftStore(),
             manual_activity_drafts=InMemoryManualActivityDraftStore(),
             manual_strava_publications=InMemoryManualStravaPublicationStore(),
+            weight_logs=InMemoryWeightLogStore(),
+            weight_drafts=InMemoryWeightDraftStore(),
+            weight_targets=InMemoryWeightTargetStore(),
             condition_reports=InMemoryConditionReportStore(),
             messenger=line,
             coach=LocalCoachGenerator(),
@@ -337,6 +354,11 @@ def build_runtime(settings: Settings) -> Runtime:
         manual_strava_publications=FirestoreManualStravaPublicationStore(
             firestore_client
         ),
+        weight_logs=BigQueryWeightLogStore(
+            bigquery_client, f"{table_prefix}.weight_logs"
+        ),
+        weight_drafts=FirestoreWeightDraftStore(firestore_client),
+        weight_targets=FirestoreWeightTargetStore(firestore_client),
         condition_reports=BigQueryConditionReportStore(
             bigquery_client, f"{table_prefix}.condition_reports"
         ),

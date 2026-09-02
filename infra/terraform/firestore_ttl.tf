@@ -118,3 +118,14 @@ resource "google_firestore_field" "plan_approval_states_ttl" {
 
   depends_on = [google_project_service.required]
 }
+
+resource "google_firestore_field" "weight_drafts_ttl" {
+  project    = var.project_id
+  database   = google_firestore_database.state.name
+  collection = "weight_drafts"
+  field      = "expires_at"
+
+  ttl_config {}
+
+  depends_on = [google_project_service.required]
+}

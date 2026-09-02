@@ -40,6 +40,9 @@ StravaのPOST WebhookはCloud Tasksへのenqueue後、2秒以内に`200 OK`を�
 - `activity_route_fingerprints`: athlete-scoped HMAC route identifiers; raw coordinates are discarded in worker memory
 - `activity_route_comparisons`: pace, heart-rate, and cadence deltas against at least two prior runs on the same route
 - `condition_reports`: subjective condition and optional symptom detail
+- `weight_logs`: immutable daily body-weight snapshots; same-day corrections append a newer row
+- `weight_targets`: optional target weight in Firestore
+- `weight_drafts`: in-progress LINE weight input and `expires_at` with Firestore TTL
 - `goals`: primary/secondary goal, target, date, status
 - `equipment`: available exercise methods and constraints
 - `proposals`: next-day workout, model/prompt version, safety result, approval status

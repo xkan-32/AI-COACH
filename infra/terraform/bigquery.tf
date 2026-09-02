@@ -615,3 +615,25 @@ resource "google_bigquery_table" "proposals" {
     { name = "decided_at", type = "TIMESTAMP", mode = "NULLABLE" },
   ])
 }
+
+resource "google_bigquery_table" "weight_logs" {
+  dataset_id          = google_bigquery_dataset.coach.dataset_id
+  table_id            = "weight_logs"
+  deletion_protection = true
+  time_partitioning {
+    type  = "DAY"
+    field = "measured_on"
+  }
+  clustering = ["user_id"]
+  schema = jsonencode([
+    { name = "log_id", type = "STRING", mode = "REQUIRED" },
+    { name = "user_id", type = "STRING", mode = "REQUIRED" },
+    { name = "measured_on", type = "DATE", mode = "REQUIRED" },
+    { name = "kilograms", type = "FLOAT", mode = "REQUIRED" },
+    { name = "unit", type = "STRING", mode = "REQUIRED" },
+    { name = "recorded_at", type = "TIMESTAMP", mode = "REQUIRED" },
+    { name = "operation_id", type = "STRING", mode = "REQUIRED" },
+    { name = "source", type = "STRING", mode = "REQUIRED" },
+    { name = "supersedes_log_id", type = "STRING", mode = "NULLABLE" },
+  ])
+}

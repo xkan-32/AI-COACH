@@ -44,7 +44,7 @@ pytest
 
 ## 実装順
 
-MVPのコアフロー、Cloud Tasks、Terraform/CI/CD、LINEリッチメニュー、PF-01、Strava token暗号化、OAuth session期限検証・TTL、Webhook再送の重複排除、GPS非保存の詳細Activity解析、versioned週間計画・実績評価・公開承認の基盤、手動shadow週間AI生成、署名付き週間画面と初回承認、LINE手動Activityはコード上実装済みです。次はPL-01D、WT-01、監視・DLQ、sandbox E2Eを進めます。週間計画の自動Scheduler・通知、別案の自動再生成、note API連携、実サービスの設定・deployはまだ行いません。
+MVPのコアフロー、Cloud Tasks、Terraform/CI/CD、LINEリッチメニュー、PF-01、Strava token暗号化、OAuth session期限検証・TTL、Webhook再送の重複排除、GPS非保存の詳細Activity解析、versioned週間計画・実績評価・公開承認の基盤、手動shadow週間AI生成、署名付き週間画面と初回承認、LINE手動Activity、体重記録はコード上実装済みです。次はPL-01D、監視・DLQ、sandbox E2Eを進めます。週間計画の自動Scheduler・通知、別案の自動再生成、note API連携、実サービスの設定・deployはまだ行いません。
 
 ## LINEテキストコマンド
 
@@ -57,6 +57,10 @@ MVPのコアフロー、Cloud Tasks、Terraform/CI/CD、LINEリッチメニュ�
 
 運動環境登録 屋外ランニング、ルームバイク、自重筋トレ、ダンベル
 運動環境確認
+
+体重
+体重 70.2
+目標体重 68
 ```
 
 新しい主目標を登録すると、以前の主目標は履歴を保ったまま副目標へ変更されます。

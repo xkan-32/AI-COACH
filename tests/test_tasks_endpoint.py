@@ -162,3 +162,24 @@ def test_proposal_decision_reports_missing_strava_link(monkeypatch) -> None:
             "連携後に最新のメッセージから操作してください。"
         ),
     )
+
+
+def test_line_event_worker_starts_weight_recording() -> None:
+    from app.main import runtime
+
+    runtime.messenger.quick_replies.clear()
+    runtime.weight_drafts.items.clear()
+    response = client.post(
+        "/tasks/line/events",
+        json={
+            "event_key": "weight-start",
+            "event": {
+                "type": "message",
+                "source": {"userId": "U-weight"},
+                "message": {"type": "text", "text": "体重"},
+            },
+        },
+    )
+    assert response.status_code == 200
+    assert runtime.messenger.quick_replies
+    assert "体重を記録する日付" in runtime.messenger.quick_replies[-1][1]
