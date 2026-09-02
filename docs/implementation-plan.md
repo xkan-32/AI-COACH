@@ -81,6 +81,16 @@ Exit: 週間AI生成、自動照合、未達理由対話、note adapterを後方
 
 Exit: 自動Schedulerと通知を有効にせず、安全な週間draftを手動shadow生成して監査できる。
 
+### Phase 2.8 - Weekly plan review and initial approval（実装済み）
+
+- LINEリッチメニューの進捗領域から署名付きワンタイム週間計画画面を開く
+- 7日分の処方、週間・日次理由、安全制約、version差分を機微な入力snapshotなしで表示
+- sessionとdecision別HMAC tokenによる計画全体の承認、却下、別案依頼
+- Firestore transactionによる所有者・週・version・期限・二重操作の競合制御
+- lifecycle eventを有効状態の正本とし、承認時だけactive plan pointerを切り替える
+
+Exit: LINE所有者だけが週間案を確認・決定でき、未承認・却下・別案依頼ではactive計画が変わらない。
+
 ### Phase 3 - Approval and Strava update（実装済み）
 
 - Send proposal with approve/reject actions and an expiring signed action token

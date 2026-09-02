@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import struct
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
@@ -53,8 +54,13 @@ class MenuMessenger(Protocol):
 
 
 class MenuActionRouter:
-    def __init__(self, messenger: MenuMessenger) -> None:
+    def __init__(
+        self,
+        messenger: MenuMessenger,
+        on_progress_requested: Callable[[str], Awaitable[None]] | None = None,
+    ) -> None:
         self._messenger = messenger
+        self._on_progress_requested = on_progress_requested
 
     async def handle(self, line_user_id: str, data: str) -> bool:
         values = _single_value_query(data)
@@ -65,6 +71,9 @@ class MenuActionRouter:
                 "このメニューは現在利用できません。LINEのトーク画面を開き直してください。"
             )
         target = values.get("target", "")
+        if target == "progress" and self._on_progress_requested is not None:
+            await self._on_progress_requested(line_user_id)
+            return True
         message = MENU_MESSAGES.get(target)
         if message is None:
             raise MenuActionError("選択されたメニュー項目を確認できませんでした。")

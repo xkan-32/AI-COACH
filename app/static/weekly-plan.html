@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>週間トレーニング計画</title>
+  <style>
+    :root{color-scheme:light;font-family:system-ui,-apple-system,sans-serif;background:#f4f7f5;color:#17211b}
+    body{margin:0}.wrap{max-width:760px;margin:auto;padding:18px}.card{background:#fff;border-radius:14px;padding:16px;margin:12px 0;box-shadow:0 2px 10px #16382012}
+    h1{font-size:1.45rem;margin:8px 0}h2{font-size:1.05rem;margin:0 0 8px}.meta,.muted{color:#5c6b61;font-size:.9rem}
+    .day{border-left:5px solid #2e7d4f}.tag{display:inline-block;background:#e7f3eb;border-radius:99px;padding:3px 9px;margin:2px;font-size:.82rem}
+    ul{padding-left:20px}.actions{display:grid;gap:10px;grid-template-columns:1fr 1fr;margin-top:18px}.actions button{min-height:48px;border:0;border-radius:10px;font-size:1rem;font-weight:700}
+    #approve{background:#247848;color:#fff}#reject{background:#f0e4e4;color:#7b2727}#repropose{grid-column:1/-1;background:#e7ebee;color:#24313a}
+    button:disabled{opacity:.5}.error{color:#a02727}.notice{color:#195d39;font-weight:700}
+  </style>
+</head>
+<body>
+<main class="wrap">
+  <h1>週間トレーニング計画</h1>
+  <div id="summary" class="card">読み込み中です…</div>
+  <section id="days"></section>
+  <div class="card">
+    <h2>計画全体への回答</h2>
+    <p class="muted">承認した場合だけ、このversionが実施中の計画になります。</p>
+    <div class="actions">
+      <button id="approve" type="button">この計画を承認</button>
+      <button id="reject" type="button">この計画を却下</button>
+      <button id="repropose" type="button">別案を依頼</button>
+    </div>
+    <p id="result" aria-live="polite"></p>
+  </div>
+</main>
+<script>
+let state=null;
+const text=(value,fallback="なし")=>value===null||value===undefined||value===""?fallback:String(value);
+const list=value=>(value&&value.length)?value.map(v=>`<span class="tag">${escapeHtml(v)}</span>`).join(""):'<span class="muted">なし</span>';
+const escapeHtml=value=>String(value).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+async function load(){
+  const response=await fetch("/weekly-plan/api",{headers:{"Accept":"application/json"},cache:"no-store"});
+  if(!response.ok)throw new Error((await response.json()).detail||"計画を読み込めませんでした。");
+  state=await response.json(); const plan=state.plan;
+  document.querySelector("#summary").innerHTML=`<div class="meta">version ${plan.version} / ${escapeHtml(plan.status)}</div><h2>週間の理由</h2><p>${escapeHtml(plan.rationale||"理由はありません。")}</p><h2>安全制約</h2><div>${list(plan.safety_constraints)}</div><h2>version差分</h2><div>${list(plan.version_changes)}</div>`;
+  document.querySelector("#days").innerHTML=plan.days.map(day=>`<article class="card day"><h2>${escapeHtml(day.date)}</h2>${day.workouts.length?day.workouts.map(workout=>`<div><strong>${escapeHtml(workout.type)}</strong><p>${text(workout.start_time,"時刻指定なし")} / ${text(workout.duration_minutes,0)}分 / ${text(workout.distance_meters)}m / ${escapeHtml(workout.intensity)}</p><div>${list(workout.environment_ids)}</div><p>${escapeHtml(workout.rationale||"日次理由はありません。")}</p><div><span class="muted">安全制約:</span> ${list(workout.safety_constraints)}</div></div>`).join(""):'<p>休養またはメニューなし</p>'}<div><span class="muted">差分:</span> ${list(day.changes)}</div></article>`).join("");
+}
+async function decide(decision){
+  if(!state)return;
+  document.querySelectorAll("button").forEach(button=>button.disabled=true);
+  const response=await fetch("/weekly-plan/api/decision",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({plan_id:state.plan.id,version:state.plan.version,decision,action_token:state.approval.actions[decision]})});
+  const body=await response.json();
+  if(!response.ok){document.querySelector("#result").className="error";document.querySelector("#result").textContent=body.detail||"操作できませんでした。";return}
+  const labels={active:"承認しました。",rejected:"却下しました。",reproposal_requested:"別案の依頼を受け付けました。実生成は今後の対応です。",duplicate:"この回答は処理済みです。"};
+  document.querySelector("#result").className="notice";document.querySelector("#result").textContent=labels[body.status]||"処理しました。";
+}
+document.querySelector("#approve").addEventListener("click",()=>decide("approve"));
+document.querySelector("#reject").addEventListener("click",()=>decide("reject"));
+document.querySelector("#repropose").addEventListener("click",()=>decide("repropose"));
+load().catch(error=>{document.querySelector("#summary").className="card error";document.querySelector("#summary").textContent=error.message});
+</script>
+</body>
+</html>

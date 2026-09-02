@@ -60,6 +60,12 @@ from app.ingestion import (
     InMemoryActivityStore,
 )
 from app.line import InMemoryConditionPromptSender, LineConditionPromptSender
+from app.plan_approval import (
+    FirestorePlanApprovalStateStore,
+    InMemoryPlanApprovalStateStore,
+    PlanActionSigner,
+    PlanApprovalStateStore,
+)
 from app.plan_generation import (
     LocalWeeklyPlanGenerator,
     VertexWeeklyPlanGenerator,
@@ -130,6 +136,11 @@ from app.web_settings import (
     InMemorySettingsLinkStore,
     SettingsLinkStore,
 )
+from app.web_weekly_plan import (
+    FirestoreWeeklyPlanLinkStore,
+    InMemoryWeeklyPlanLinkStore,
+    WeeklyPlanLinkStore,
+)
 
 
 @dataclass(frozen=True)
@@ -169,6 +180,9 @@ class Runtime:
     training_settings_state: TrainingSettingsStateStore
     training_settings_history: TrainingSettingsHistoryStore
     weekly_plan_generator: WeeklyPlanGenerator
+    plan_approval_states: PlanApprovalStateStore
+    plan_action_signer: PlanActionSigner
+    weekly_plan_links: WeeklyPlanLinkStore
     publication_history: PublicationHistoryStore
     publication_states: PublicationApprovalStateStore
     publication_signer: PublicationActionSigner
@@ -182,6 +196,8 @@ def build_runtime(settings: Settings) -> Runtime:
         goals = InMemoryGoalStore()
         training_resources = InMemoryTrainingResourceStore()
         training_settings = InMemoryTrainingSettingsStore()
+        planning_history = InMemoryPlanningHistoryStore()
+        active_plan_pointers = InMemoryActivePlanPointerStore()
         return Runtime(
             events=InMemoryEventStore(),
             oauth_sessions=InMemoryOAuthSessionStore(),
@@ -215,11 +231,14 @@ def build_runtime(settings: Settings) -> Runtime:
             profile_drafts=InMemoryProfileDraftStore(),
             profile_settings=InMemoryProfileSettingsStore(goals, training_resources),
             settings_links=InMemorySettingsLinkStore(),
-            planning_history=InMemoryPlanningHistoryStore(),
-            active_plan_pointers=InMemoryActivePlanPointerStore(),
+            planning_history=planning_history,
+            active_plan_pointers=active_plan_pointers,
             training_settings_state=training_settings,
             training_settings_history=training_settings,
             weekly_plan_generator=LocalWeeklyPlanGenerator(),
+            plan_approval_states=InMemoryPlanApprovalStateStore(),
+            plan_action_signer=PlanActionSigner(settings.oauth_state_signing_key),
+            weekly_plan_links=InMemoryWeeklyPlanLinkStore(),
             publication_history=InMemoryPublicationHistoryStore(),
             publication_states=InMemoryPublicationApprovalStateStore(),
             publication_signer=PublicationActionSigner(
@@ -258,6 +277,8 @@ def build_runtime(settings: Settings) -> Runtime:
     proposal_analytics = BigQueryProposalStore(
         bigquery_client, f"{table_prefix}.proposals", settings.vertex_model
     )
+    planning_history = BigQueryPlanningHistoryStore(bigquery_client, table_prefix)
+    active_plan_pointers = FirestoreActivePlanPointerStore(firestore_client)
     return Runtime(
         events=FirestoreEventStore(firestore_client),
         oauth_sessions=FirestoreOAuthSessionStore(firestore_client),
@@ -320,8 +341,8 @@ def build_runtime(settings: Settings) -> Runtime:
         profile_drafts=FirestoreProfileDraftStore(firestore_client),
         profile_settings=FirestoreProfileSettingsStore(firestore_client),
         settings_links=FirestoreSettingsLinkStore(firestore_client),
-        planning_history=BigQueryPlanningHistoryStore(bigquery_client, table_prefix),
-        active_plan_pointers=FirestoreActivePlanPointerStore(firestore_client),
+        planning_history=planning_history,
+        active_plan_pointers=active_plan_pointers,
         training_settings_state=FirestoreTrainingSettingsStateStore(firestore_client),
         training_settings_history=BigQueryTrainingSettingsHistoryStore(
             bigquery_client, table_prefix
@@ -329,6 +350,9 @@ def build_runtime(settings: Settings) -> Runtime:
         weekly_plan_generator=VertexWeeklyPlanGenerator(
             genai_client, settings.vertex_model
         ),
+        plan_approval_states=FirestorePlanApprovalStateStore(firestore_client),
+        plan_action_signer=PlanActionSigner(settings.oauth_state_signing_key),
+        weekly_plan_links=FirestoreWeeklyPlanLinkStore(firestore_client),
         publication_history=BigQueryPublicationHistoryStore(
             bigquery_client, table_prefix
         ),

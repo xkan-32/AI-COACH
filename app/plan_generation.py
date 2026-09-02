@@ -71,6 +71,10 @@ class ConditionHistoryReader(Protocol):
     ) -> list[ConditionReport]: ...
 
 
+class DraftPlanRegistrar(Protocol):
+    async def register_draft(self, plan: Any) -> None: ...
+
+
 class VertexWeeklyPlanGenerator:
     def __init__(self, client: object, model: str) -> None:
         self._client = client
@@ -125,6 +129,7 @@ class WeeklyPlanGenerationService:
         activities: ActivityHistoryReader,
         conditions: ConditionHistoryReader,
         model_name: str,
+        draft_registrar: DraftPlanRegistrar | None = None,
     ) -> None:
         self._generator = generator
         self._history = history
@@ -134,6 +139,7 @@ class WeeklyPlanGenerationService:
         self._activities = activities
         self._conditions = conditions
         self._model_name = model_name
+        self._draft_registrar = draft_registrar
 
     async def generate_shadow_plan(
         self,
@@ -167,6 +173,8 @@ class WeeklyPlanGenerationService:
         if existing is not None:
             if existing.input_snapshot.get("generation_key") != generation_key:
                 raise ValueError("plan version already belongs to another input")
+            if self._draft_registrar is not None:
+                await self._draft_registrar.register_draft(existing)
             workouts = await self._history.list_workouts(plan_id)
             return WeeklyPlanGenerationResult(
                 plan_id=existing.id,
@@ -209,6 +217,7 @@ class WeeklyPlanGenerationService:
         )
         used_fallback = False
         safety_flags: list[str] = []
+        display_safety_constraints = _display_safety_constraints(plan_input)
         try:
             output = await self._generator.generate(plan_input)
             violations = validate_weekly_plan_output(output, plan_input)
@@ -232,7 +241,7 @@ class WeeklyPlanGenerationService:
             athlete_id=profile.provider_athlete_id,
             status=TrainingPlanStatus.DRAFT,
             plan_rationale=output.plan_rationale,
-            safety_flags=safety_flags,
+            safety_flags=[*display_safety_constraints, *safety_flags],
             ai_model=self._model_name,
             prompt_version=PLAN_PROMPT_VERSION,
             input_snapshot=plan_input,
@@ -252,6 +261,7 @@ class WeeklyPlanGenerationService:
                 environment_ids=item.environment_ids,
                 outdoors=item.outdoors,
                 rationale=item.rationale,
+                safety_constraints=display_safety_constraints,
                 created_at=now,
             )
             for index, item in enumerate(output.workouts)
@@ -281,6 +291,8 @@ class WeeklyPlanGenerationService:
         await self._history.save_workouts(workouts)
         await self._history.save_safety_gate(gate)
         await self._history.save_lifecycle_event(lifecycle)
+        if self._draft_registrar is not None:
+            await self._draft_registrar.register_draft(plan)
         return WeeklyPlanGenerationResult(
             plan_id=plan.id,
             status=plan.status,
@@ -615,3 +627,17 @@ def _bounded_value(value: Any) -> Any:
     if isinstance(value, (bool, int, float)) or value is None:
         return value
     return str(value)[:200]
+
+
+def _display_safety_constraints(plan_input: dict[str, Any]) -> list[str]:
+    constraints = plan_input["hard_constraints"]
+    result = [
+        f"weekly_duration_limit_minutes:{constraints['weekly_duration_limit_minutes']}",
+        f"maximum_moderate_days:{constraints['maximum_moderate_days']}",
+        "no_consecutive_moderate_days",
+        "availability_is_mandatory",
+        "environment_ids_must_be_listed",
+    ]
+    if constraints.get("latest_condition"):
+        result.append(f"latest_condition:{constraints['latest_condition']}")
+    return result

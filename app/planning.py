@@ -43,6 +43,7 @@ class TrainingPlanStatus(StrEnum):
     PENDING_APPROVAL = "pending_approval"
     ACTIVE = "active"
     REJECTED = "rejected"
+    REPROPOSAL_REQUESTED = "reproposal_requested"
     EXPIRED = "expired"
     GENERATION_FAILED = "generation_failed"
     SUPERSEDED = "superseded"
@@ -1193,8 +1194,33 @@ class PlanningService:
             or approval_event.to_status != TrainingPlanStatus.ACTIVE
         ):
             raise PlanVersionConflict("Plan activation requires its approval event")
+        stored = await self._history.get_plan(plan.id)
+        if stored != plan:
+            raise PlanVersionConflict("Approved plan must already exist unchanged")
+        stored_workouts = await self._history.list_workouts(plan.id)
+        if list(workouts) != stored_workouts:
+            raise PlanVersionConflict("Approved workouts must already exist unchanged")
+        current_id = await self._pointers.get(plan.user_id, plan.week_start)
+        if current_id == plan.id:
+            await self._history.save_lifecycle_event(approval_event)
+            return
+        if current_id != plan.supersedes_plan_version_id:
+            raise PlanVersionConflict(
+                "supersedes_plan_version_id is not the active plan"
+            )
+        if current_id is None and plan.version != 1:
+            raise PlanVersionConflict("First plan version must be 1")
+        if current_id is not None:
+            current = await self._history.get_plan(current_id)
+            if current is None or plan.version != current.version + 1:
+                raise PlanVersionConflict("Plan version must increment by one")
         await self._history.save_lifecycle_event(approval_event)
-        await self.activate_version(plan, workouts)
+        await self._pointers.set(
+            plan.user_id,
+            plan.week_start,
+            plan.id,
+            current_id,
+        )
 
 
 def create_plan_version(
@@ -1386,11 +1412,13 @@ PLAN_TRANSITIONS: dict[TrainingPlanStatus, frozenset[TrainingPlanStatus]] = {
         {
             TrainingPlanStatus.ACTIVE,
             TrainingPlanStatus.REJECTED,
+            TrainingPlanStatus.REPROPOSAL_REQUESTED,
             TrainingPlanStatus.EXPIRED,
         }
     ),
     TrainingPlanStatus.ACTIVE: frozenset({TrainingPlanStatus.SUPERSEDED}),
     TrainingPlanStatus.REJECTED: frozenset(),
+    TrainingPlanStatus.REPROPOSAL_REQUESTED: frozenset(),
     TrainingPlanStatus.EXPIRED: frozenset(),
     TrainingPlanStatus.GENERATION_FAILED: frozenset(),
     TrainingPlanStatus.SUPERSEDED: frozenset(),
