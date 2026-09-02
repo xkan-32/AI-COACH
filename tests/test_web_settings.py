@@ -11,10 +11,66 @@ from app.profile import (
     ProfileWorkflow,
 )
 from app.web_settings import (
+    FirestoreSettingsLinkStore,
     InMemorySettingsLinkStore,
     InvalidSettingsToken,
     SettingsTokenSigner,
 )
+
+
+@pytest.mark.asyncio
+async def test_firestore_settings_link_awaits_transaction_get_before_iteration() -> (
+    None
+):
+    now = datetime(2026, 9, 2, tzinfo=UTC)
+
+    class Snapshot:
+        exists = True
+
+        def to_dict(self):
+            return {
+                "line_user_id": "U-firestore",
+                "expires_at": now + timedelta(minutes=1),
+                "used_at": None,
+            }
+
+    class Transaction:
+        def __init__(self) -> None:
+            self.updated = False
+            self.committed = False
+
+        async def get(self, document):
+            async def stream():
+                yield Snapshot()
+
+            return stream()
+
+        def update(self, document, values) -> None:
+            self.updated = values["used_at"] == now
+
+        async def commit(self) -> None:
+            self.committed = True
+
+    class Document:
+        pass
+
+    class Collection:
+        def document(self, nonce):
+            return Document()
+
+    transaction = Transaction()
+
+    class Client:
+        def collection(self, name):
+            return Collection()
+
+        def transaction(self):
+            return transaction
+
+    store = FirestoreSettingsLinkStore(Client())
+    assert await store.consume("nonce", now) == "U-firestore"
+    assert transaction.updated
+    assert transaction.committed
 
 
 def test_settings_page_requires_one_time_link_and_saves_multiple_items() -> None:
