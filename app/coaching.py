@@ -80,10 +80,14 @@ def build_coaching_input(
     context: CoachingContext,
     constraints: list[str] | None = None,
 ) -> dict:
+    coaching_context = context.model_dump(mode="json")
+    route_comparison = coaching_context.get("current_route_comparison")
+    if route_comparison is not None:
+        route_comparison.pop("route_hash", None)
     return {
         "activity": activity.model_dump(mode="json"),
         "condition": report.model_dump(mode="json"),
-        "coaching_context": context.model_dump(mode="json"),
+        "coaching_context": coaching_context,
         "mandatory_constraints": constraints or hard_safety_constraints(report),
         "task": "Propose one conservative workout for the next day in Japanese.",
     }

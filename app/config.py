@@ -17,6 +17,7 @@ class Settings(BaseSettings):
     strava_redirect_uri: str = "http://localhost:8080/oauth/strava/callback"
     oauth_state_signing_key: str = "local-development-only"
     token_encryption_key: str = ""
+    route_fingerprint_key: str = ""
     firestore_database: str = "(default)"
     cloud_tasks_queue_path: str = ""
     worker_url: str = ""

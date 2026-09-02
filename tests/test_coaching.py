@@ -13,6 +13,7 @@ from app.domain.models import (
     CoachingContext,
     ConditionLevel,
     ConditionReport,
+    RouteComparisonSummary,
     WorkoutProposal,
 )
 from app.line import InMemoryConditionPromptSender
@@ -89,6 +90,15 @@ def test_coaching_input_contains_metrics_but_no_raw_location_data() -> None:
             average_pace_seconds_per_km=360,
             ascent_meters=120,
         ),
+        current_route_comparison=RouteComparisonSummary(
+            activity_id="activity-1",
+            athlete_id="athlete-1",
+            activity_started_at=datetime(2026, 9, 1, tzinfo=UTC),
+            route_hash="must-not-leave-the-worker-boundary",
+            comparison_version="v1",
+            baseline_activity_count=2,
+            pace_delta_percent=-2,
+        ),
     )
 
     payload = build_coaching_input(activity(), report(ConditionLevel.GOOD), context)
@@ -98,6 +108,7 @@ def test_coaching_input_contains_metrics_but_no_raw_location_data() -> None:
     )
     assert "latlng" not in str(payload)
     assert "stream_points" not in str(payload)
+    assert "route_hash" not in str(payload)
 
 
 def test_legacy_workout_proposal_has_nullable_planning_links() -> None:

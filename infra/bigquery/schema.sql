@@ -195,6 +195,64 @@ CREATE TABLE IF NOT EXISTS `training_coach.publication_decisions` (
 PARTITION BY DATE(decided_at)
 CLUSTER BY athlete_id, provider;
 
+CREATE TABLE IF NOT EXISTS `training_coach.activity_segment_metrics` (
+  activity_id STRING NOT NULL,
+  athlete_id STRING NOT NULL,
+  activity_started_at TIMESTAMP NOT NULL,
+  computation_version STRING NOT NULL,
+  segment_index INT64 NOT NULL,
+  start_distance_meters FLOAT64 NOT NULL,
+  end_distance_meters FLOAT64 NOT NULL,
+  elapsed_seconds INT64,
+  pace_seconds_per_km FLOAT64,
+  elevation_gain_meters FLOAT64,
+  elevation_loss_meters FLOAT64,
+  average_grade_percent FLOAT64,
+  average_heartrate_bpm FLOAT64,
+  max_heartrate_bpm FLOAT64,
+  average_cadence_per_minute FLOAT64,
+  relative_load_rank_percentile FLOAT64,
+  high_load_reasons ARRAY<STRING>,
+  metric_quality STRING NOT NULL,
+  quality_reasons ARRAY<STRING>,
+  computed_at TIMESTAMP NOT NULL
+)
+PARTITION BY DATE(activity_started_at)
+CLUSTER BY athlete_id, activity_id;
+
+CREATE TABLE IF NOT EXISTS `training_coach.activity_route_fingerprints` (
+  activity_id STRING NOT NULL,
+  athlete_id STRING NOT NULL,
+  activity_started_at TIMESTAMP NOT NULL,
+  fingerprint_version STRING NOT NULL,
+  route_hash STRING NOT NULL,
+  covered_distance_meters FLOAT64 NOT NULL,
+  sampled_point_count INT64 NOT NULL,
+  trim_start_meters FLOAT64 NOT NULL,
+  trim_end_meters FLOAT64 NOT NULL,
+  quantization_decimals INT64 NOT NULL,
+  computed_at TIMESTAMP NOT NULL
+)
+PARTITION BY DATE(activity_started_at)
+CLUSTER BY athlete_id, route_hash;
+
+CREATE TABLE IF NOT EXISTS `training_coach.activity_route_comparisons` (
+  activity_id STRING NOT NULL,
+  athlete_id STRING NOT NULL,
+  activity_started_at TIMESTAMP NOT NULL,
+  route_hash STRING NOT NULL,
+  comparison_version STRING NOT NULL,
+  baseline_activity_count INT64 NOT NULL,
+  previous_activity_id STRING,
+  pace_delta_percent FLOAT64,
+  heartrate_delta_bpm FLOAT64,
+  cadence_delta_per_minute FLOAT64,
+  high_load_segment_indexes ARRAY<INT64>,
+  computed_at TIMESTAMP NOT NULL
+)
+PARTITION BY DATE(activity_started_at)
+CLUSTER BY athlete_id, route_hash;
+
 CREATE TABLE IF NOT EXISTS `training_coach.condition_reports` (
   athlete_id STRING NOT NULL,
   activity_id STRING NOT NULL,

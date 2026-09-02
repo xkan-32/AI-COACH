@@ -36,6 +36,9 @@ StravaのPOST WebhookはCloud Tasksへのenqueue後、2秒以内に`200 OK`を�
 - `activity_laps`: normalized lap summaries keyed by activity and lap index
 - `activity_stream_points`: GPS-free time-series points for time, distance, altitude, speed, heart rate, cadence, watts, temperature, movement, and grade
 - `activity_metrics`: versioned, reproducible per-activity metrics and data-quality reasons
+- `activity_segment_metrics`: GPS-free 250m segment summaries with evidence-backed relative load ranks
+- `activity_route_fingerprints`: athlete-scoped HMAC route identifiers; raw coordinates are discarded in worker memory
+- `activity_route_comparisons`: pace, heart-rate, and cadence deltas against at least two prior runs on the same route
 - `condition_reports`: subjective condition and optional symptom detail
 - `goals`: primary/secondary goal, target, date, status
 - `equipment`: available exercise methods and constraints
@@ -80,6 +83,14 @@ BigQuery is used for immutable history and analysis. Firestore is used for OAuth
 - LINE体調確認にはActivity ID由来の安定した`X-Line-Retry-Key`を付け、送信成功後にprompt stageを完了する。
 - Vertex AIへ渡すのはActivity summary、派生指標、直近Activity・Condition履歴だけであり、生streamは渡さない。
 - 最大心拍等の本人設定がない状態では心拍zoneを推定しない。7日／30日負荷や負荷急増flagはAN-01で実装する。
+
+## AC-02 区間負荷・同一ルート比較
+
+- 保存済みのGPS非依存streamを250m区間へ集約し、pace、標高差、勾配、心拍、cadence、品質理由を保存する。
+- 高負荷判定は同一Activity内の相対rankと、心拍上昇、登坂、pace低下、cadence低下の根拠コードで表現する。最大心拍未設定時の絶対的な生理負荷は推定しない。
+- route fingerprintの作成時だけ`latlng`を取得し、先頭・末尾500mを除外、250m間隔でsample、約100m粒度へ量子化して、athlete IDを含むHMAC-SHA256へ変換する。座標とcanonical点列はworkerメモリから破棄し、保存・ログ・AI送信を行わない。
+- 同一route hashの過去Activityが2件以上ある場合だけ、pace、心拍、cadenceの中央値差分を作成する。逆走と距離差はv1では別routeとして扱う。
+- Vertex AIには高負荷区間と比較差分だけを渡し、route hashも送信しない。
 
 ## Safety boundary
 
