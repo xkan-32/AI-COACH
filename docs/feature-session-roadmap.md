@@ -43,11 +43,12 @@ Strava Webhook -> Cloud Tasks -> Activity取得・保存
 - PL-01C（署名付き週間計画画面と初回承認）
 - MA-01（LINE手動Activity。確認後にStrava Manual Activityを作成し、提案はDescriptionへ追記）
 - WT-01（体重記録。LINE会話で登録・同日訂正・7日/30日平均・目標差）
+- PL-01D（Strava／手動Activityの共通matcher、曖昧・計画外・重複・未実施確認・手動訂正）
 
 未実装・拡張対象:
 
 - 状態別リッチメニュー（RM-05）
-- 実績照合以降の計画feedback loop（PL-01D〜F）
+- Workout Review以降の計画feedback loop（PL-01E〜F）
 - 7日/30日負荷、連続症状分析
 - 提案修正、進捗表示、通知設定
 - データ保持・削除、監視、DLQ、総合障害試験
@@ -150,6 +151,7 @@ PF-01の対象外:
 - PL-01A（ドメイン契約・設定基盤）は完了。実装記録は`docs/next-session-pl-01a.md`を参照する。
 - PL-01B（手動shadow週間生成）は完了。実装記録は`docs/next-session-pl-01b.md`を参照する。
 - PL-01C（週間計画画面・初回承認）は完了。実装記録は`docs/next-session-pl-01c.md`を参照する。
+- PL-01D（実績照合）は完了。実装記録は`docs/next-session-pl-01d.md`を参照する。
 - 計画の所有主体はapp userとし、Strava未連携・手動Activityのみでも利用可能にする。
 - 安全上`blocked`となった元メニューは、ユーザーが代替案を拒否しても実施可能扱いへ戻さない。
 

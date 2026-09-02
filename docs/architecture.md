@@ -67,8 +67,8 @@ BigQuery is used for immutable history and analysis. Firestore is used for OAuth
 
 - 週間計画は上書きせず、週・athlete・versionから決定的に識別する。Firestoreには週ごとのactive pointerだけを置き、全versionとAI入力snapshotはBigQueryへappend-onlyで保存する。
 - 日次メニューは計画version、日付、sequenceから決定的に識別する。既存の`WorkoutProposal`はnullableな計画FKを持ち、未計画の日次提案も後方互換で扱う。
-- 実績照合はStravaと手動Activityを同じ境界で扱い、matcher versionと客観的な差分を保持する。
-- Reviewは客観要因、体調、対話由来要因を分離し、次計画向けfeedback codeとAI／rule versionを残す。週間shadow生成は接続済みで、自動照合と未達理由対話は後続機能で接続する。
+- 実績照合はStravaと手動Activityを同じ境界で扱い、matcher version、候補score、matching evidence、客観的な差分を保持する。明示link、高信頼度自動照合、曖昧・計画外・重複候補、split、未実施確認、手動訂正まで接続済みである。
+- Reviewは客観要因、体調、対話由来要因を分離し、次計画向けfeedback codeとAI／rule versionを残す。週間shadow生成と実績照合は接続済みで、Workout ReviewとReadinessはPL-01Eで接続する。
 
 ## 外部公開承認境界
 
@@ -103,13 +103,21 @@ BigQuery is used for immutable history and analysis. Firestore is used for OAuth
 - Firestoreの承認stateは週開始日とversionを含むpending pointerをCAS更新し、古い週・旧version・二重操作を拒否する。
 - `TrainingPlanVersion`の作成時statusは不変のまま保持し、有効状態はlifecycle eventを正本とする。承認時だけ既存rowを再保存せずactive pointerを切り替える。
 
+## PL-01D 実績照合
+
+- Activityのapp user所有者とtimezone上の実施日からactive planを解決し、手動登録時の明示linkを最優先する。
+- 自動matcherは種目、予定開始時刻、時間、距離をversion付きでscore化する。一意な高信頼度候補だけを確定し、曖昧・低信頼度・重複候補はLINEで本人確認する。
+- `WorkoutReconciliation`は候補ID、confidence、evidence、確定状態、訂正元、operation IDをappend-onlyで保持する。確定結果は別の`WorkoutExecutionState`へ反映し、PlannedWorkoutを変更しない。
+- provider同期確認済みかつ予定終了後のgrace period経過時だけ未実施候補を作り、未実施、同期待ち、予定変更を本人へ確認する。Scheduler起動はNT-01へ残す。
+- Activity Description、手動詳細、健康自由記述、GPS、生stream、route hashを照合履歴やLINE選択へ含めない。
+
 ## MA-01 LINE手動Activity
 
 - リッチメニューの「運動を記録」から会話を開始し、種目・日時・時間・主観強度・完了状態・任意の計画メニューと運動環境を登録する。
 - 「記録する」はStrava Manual Activity作成の明示承認。未連携では開始せず、確認後に`POST /api/v3/activities`へ作成する。
 - 保存先は共通`Activity`境界。`source_type=line_manual`、`user_id`、Strava Activity IDを`id` / `source_activity_id`に使い、心拍や消費カロリーは推測しない。
 - Firestore draftは24時間TTL。同じoperationの再送はpublication storeのStrava IDへ収束し、内容が変わった場合だけ拒否する。
-- 保存後は既存の体調確認へ接続する。翌日提案の「投稿」は同じStrava ActivityのDescriptionへ追記する。実績照合は後続機能へ残す。
+- 保存後は共通実績照合と既存の体調確認へ接続する。翌日提案の「投稿」は同じStrava ActivityのDescriptionへ追記する。
 
 ## AC-01 詳細Activity・負荷解析
 

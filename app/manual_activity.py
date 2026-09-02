@@ -108,6 +108,7 @@ class ManualActivityWorkflow:
         strava: StravaClient | None = None,
         publications: ManualStravaPublicationStore | None = None,
         ingestion_state: ActivityIngestionStateStore | None = None,
+        on_saved: Callable[[Activity, str], Awaitable[None]] | None = None,
         on_completed: Callable[[Activity, str], Awaitable[None]] | None = None,
         clock=lambda: datetime.now(UTC),
     ) -> None:
@@ -123,6 +124,7 @@ class ManualActivityWorkflow:
         self._strava = strava
         self._publications = publications
         self._ingestion_state = ingestion_state
+        self._on_saved = on_saved
         self._on_completed = on_completed
         self._clock = clock
 
@@ -356,6 +358,8 @@ class ManualActivityWorkflow:
             draft.line_user_id,
             "運動をStravaに記録しました。体調確認のあと、提案を同じActivityへ投稿できます。",
         )
+        if self._on_saved is not None:
+            await self._on_saved(activity, draft.line_user_id)
         if first_save and self._on_completed is not None:
             await self._on_completed(activity, draft.line_user_id)
 

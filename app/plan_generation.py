@@ -260,6 +260,12 @@ class WeeklyPlanGenerationService:
                 availability_slot_id=item.availability_slot_id,
                 environment_ids=item.environment_ids,
                 outdoors=item.outdoors,
+                split_allowed=_split_allowed(
+                    availability,
+                    item.scheduled_date,
+                    item.availability_slot_id,
+                    now,
+                ),
                 rationale=item.rationale,
                 safety_constraints=display_safety_constraints,
                 created_at=now,
@@ -300,6 +306,20 @@ class WeeklyPlanGenerationService:
             used_fallback=used_fallback,
             input_digest=planning_input_digest(plan_input),
         )
+
+
+def _split_allowed(
+    availability: WeeklyAvailabilityVersion | None,
+    scheduled_date: date,
+    availability_slot_id: str | None,
+    now: datetime,
+) -> bool:
+    if availability is None or availability_slot_id is None:
+        return False
+    return any(
+        slot.id == availability_slot_id and slot.split_allowed
+        for slot in availability.slots_for(scheduled_date, now)
+    )
 
 
 def build_weekly_plan_input(

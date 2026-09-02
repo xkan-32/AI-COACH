@@ -358,6 +358,7 @@ class PlannedWorkout(ImmutableModel):
     target_distance_meters: float | None = Field(default=None, ge=0)
     target_intensity: str
     outdoors: bool = False
+    split_allowed: bool = False
     environment_ids: list[str] = Field(default_factory=list)
     safety_constraints: list[str] = Field(default_factory=list)
     rationale: str = Field(default="", max_length=500)
@@ -374,19 +375,29 @@ class PlannedWorkout(ImmutableModel):
 
 class WorkoutReconciliation(ImmutableModel):
     id: str
-    plan_version_id: str
-    planned_workout_id: str
+    plan_version_id: str | None = None
+    planned_workout_id: str | None = None
     user_id: str
     athlete_id: str | None = None
     source_type: str
     activity_id: str | None = None
     status: ReconciliationStatus
+    candidate_planned_workout_ids: list[str] = Field(default_factory=list)
+    match_confidence: float | None = Field(default=None, ge=0, le=1)
+    matching_evidence: list[str] = Field(default_factory=list)
+    confirmed: bool = False
     duration_delta_minutes: float | None = None
     distance_delta_meters: float | None = None
     intensity_delta: str | None = None
     matcher_version: str
     objective_factors: list[str] = Field(default_factory=list)
+    manual_correction: bool = False
+    correction_reason: str | None = Field(default=None, max_length=200)
+    supersedes_reconciliation_id: str | None = None
+    operation_id: str = Field(min_length=1)
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+
+    _created_at_is_aware = field_validator("created_at")(_require_utc)
 
 
 class WorkoutReview(ImmutableModel):
@@ -893,6 +904,18 @@ class PlanningHistoryStore(Protocol):
     async def save_reconciliation(
         self, reconciliation: WorkoutReconciliation
     ) -> None: ...
+    async def get_reconciliation(
+        self, reconciliation_id: str
+    ) -> WorkoutReconciliation | None: ...
+    async def list_activity_reconciliations(
+        self, activity_id: str
+    ) -> list[WorkoutReconciliation]: ...
+    async def list_workout_reconciliations(
+        self, planned_workout_id: str
+    ) -> list[WorkoutReconciliation]: ...
+    async def list_plan_reconciliations(
+        self, plan_version_id: str
+    ) -> list[WorkoutReconciliation]: ...
     async def save_review(self, review: WorkoutReview) -> None: ...
     async def save_execution_state(self, state: WorkoutExecutionState) -> None: ...
     async def save_safety_gate(self, result: SafetyGateResult) -> None: ...
@@ -950,6 +973,47 @@ class InMemoryPlanningHistoryStore:
 
     async def save_reconciliation(self, reconciliation: WorkoutReconciliation) -> None:
         _save_immutable(self.reconciliations, reconciliation.id, reconciliation)
+
+    async def get_reconciliation(
+        self, reconciliation_id: str
+    ) -> WorkoutReconciliation | None:
+        return self.reconciliations.get(reconciliation_id)
+
+    async def list_activity_reconciliations(
+        self, activity_id: str
+    ) -> list[WorkoutReconciliation]:
+        return sorted(
+            [
+                item
+                for item in self.reconciliations.values()
+                if item.activity_id == activity_id
+            ],
+            key=lambda item: item.created_at,
+        )
+
+    async def list_workout_reconciliations(
+        self, planned_workout_id: str
+    ) -> list[WorkoutReconciliation]:
+        return sorted(
+            [
+                item
+                for item in self.reconciliations.values()
+                if item.planned_workout_id == planned_workout_id
+            ],
+            key=lambda item: item.created_at,
+        )
+
+    async def list_plan_reconciliations(
+        self, plan_version_id: str
+    ) -> list[WorkoutReconciliation]:
+        return sorted(
+            [
+                item
+                for item in self.reconciliations.values()
+                if item.plan_version_id == plan_version_id
+            ],
+            key=lambda item: item.created_at,
+        )
 
     async def save_review(self, review: WorkoutReview) -> None:
         _save_immutable(self.reviews, review.id, review)
@@ -1080,7 +1144,12 @@ class BigQueryPlanningHistoryStore:
         rows = await asyncio.to_thread(
             lambda: list(self._client.query(query, job_config=config).result())
         )
-        return [PlannedWorkout.model_validate(dict(row.items())) for row in rows]
+        workouts = []
+        for row in rows:
+            values = dict(row.items())
+            values["split_allowed"] = bool(values.get("split_allowed"))
+            workouts.append(PlannedWorkout.model_validate(values))
+        return workouts
 
     async def save_workouts(self, workouts: Sequence[PlannedWorkout]) -> None:
         for workout in workouts:
@@ -1096,6 +1165,74 @@ class BigQueryPlanningHistoryStore:
             reconciliation.model_dump(mode="json"),
             reconciliation.id,
         )
+
+    async def get_reconciliation(
+        self, reconciliation_id: str
+    ) -> WorkoutReconciliation | None:
+        rows = await self._query_reconciliations("id", reconciliation_id, limit=1)
+        return rows[0] if rows else None
+
+    async def list_activity_reconciliations(
+        self, activity_id: str
+    ) -> list[WorkoutReconciliation]:
+        return await self._query_reconciliations("activity_id", activity_id)
+
+    async def list_workout_reconciliations(
+        self, planned_workout_id: str
+    ) -> list[WorkoutReconciliation]:
+        return await self._query_reconciliations(
+            "planned_workout_id", planned_workout_id
+        )
+
+    async def list_plan_reconciliations(
+        self, plan_version_id: str
+    ) -> list[WorkoutReconciliation]:
+        return await self._query_reconciliations("plan_version_id", plan_version_id)
+
+    async def _query_reconciliations(
+        self, field: str, value: str, limit: int | None = None
+    ) -> list[WorkoutReconciliation]:
+        from google.cloud import bigquery
+
+        if field not in {
+            "id",
+            "activity_id",
+            "planned_workout_id",
+            "plan_version_id",
+        }:
+            raise ValueError("Unsupported reconciliation lookup")
+        query = (
+            f"SELECT * FROM `{self._prefix}.workout_reconciliations` "
+            f"WHERE {field} = @value ORDER BY created_at, id"
+            + (" LIMIT @limit" if limit is not None else "")
+        )
+        parameters = [bigquery.ScalarQueryParameter("value", "STRING", value)]
+        if limit is not None:
+            parameters.append(bigquery.ScalarQueryParameter("limit", "INT64", limit))
+        config = bigquery.QueryJobConfig(query_parameters=parameters)
+        rows = await asyncio.to_thread(
+            lambda: list(self._client.query(query, job_config=config).result())
+        )
+        reconciliations = []
+        for row in rows:
+            values = dict(row.items())
+            values["candidate_planned_workout_ids"] = list(
+                values.get("candidate_planned_workout_ids") or []
+            )
+            values["matching_evidence"] = list(values.get("matching_evidence") or [])
+            values["objective_factors"] = list(values.get("objective_factors") or [])
+            values["operation_id"] = values.get("operation_id") or (
+                f"legacy:{values['id']}"
+            )
+            if values.get("confirmed") is None:
+                values["confirmed"] = values.get("status") in {
+                    ReconciliationStatus.MATCHED.value,
+                    ReconciliationStatus.PARTIAL.value,
+                    ReconciliationStatus.NOT_PERFORMED.value,
+                }
+            values["manual_correction"] = bool(values.get("manual_correction"))
+            reconciliations.append(WorkoutReconciliation.model_validate(values))
+        return reconciliations
 
     async def save_review(self, review: WorkoutReview) -> None:
         row = review.model_dump(mode="json")
@@ -1352,28 +1489,41 @@ def create_planned_workout(
 
 
 def create_reconciliation(
-    workout: PlannedWorkout,
+    workout: PlannedWorkout | None,
     source_type: str,
     matcher_version: str,
     activity_id: str | None = None,
+    *,
+    user_id: str | None = None,
+    athlete_id: str | None = None,
+    plan_version_id: str | None = None,
+    operation_id: str = "automatic",
     **values,
 ) -> WorkoutReconciliation:
+    owner_id = workout.user_id if workout is not None else user_id
+    if not owner_id:
+        raise ValueError("reconciliation requires a user owner")
+    workout_id = workout.id if workout is not None else None
+    resolved_plan_id = (
+        workout.plan_version_id if workout is not None else plan_version_id
+    )
     reconciliation_id = str(
         uuid.uuid5(
             uuid.NAMESPACE_URL,
-            f"ai-coach:reconciliation:{workout.id}:{source_type}:"
-            f"{activity_id or 'unmatched'}:{matcher_version}",
+            f"ai-coach:reconciliation:{workout_id or 'none'}:{source_type}:"
+            f"{activity_id or 'unmatched'}:{matcher_version}:{operation_id}",
         )
     )
     return WorkoutReconciliation(
         id=reconciliation_id,
-        plan_version_id=workout.plan_version_id,
-        planned_workout_id=workout.id,
-        user_id=workout.user_id,
-        athlete_id=workout.athlete_id,
+        plan_version_id=resolved_plan_id,
+        planned_workout_id=workout_id,
+        user_id=owner_id,
+        athlete_id=(workout.athlete_id if workout is not None else athlete_id),
         source_type=source_type,
         activity_id=activity_id,
         matcher_version=matcher_version,
+        operation_id=operation_id,
         **values,
     )
 

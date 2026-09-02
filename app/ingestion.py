@@ -80,6 +80,13 @@ class ActivityIngestionService:
         activity = await self._strava.get_activity(activity_id, token.access_token)
         if activity.athlete_id != athlete_id:
             raise ValueError("Strava activity owner mismatch")
+        activity = activity.model_copy(
+            update={
+                "user_id": token.line_user_id,
+                "source_type": ActivitySource.STRAVA,
+                "source_activity_id": activity.source_activity_id or activity.id,
+            }
+        )
         if (
             self._ingestion_state is None
             or not await self._ingestion_state.is_completed(activity_id, "activity")
