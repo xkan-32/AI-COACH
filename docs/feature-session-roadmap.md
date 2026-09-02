@@ -48,7 +48,7 @@ Strava Webhook -> Cloud Tasks -> Activity取得・保存
 未実装・拡張対象:
 
 - 状態別リッチメニュー（RM-05）
-- 承認付き再計画（PL-01F）
+- timezone別Scheduler、通知、再通知、DLQ、監視（NT-01）
 - 7日/30日負荷、連続症状分析
 - 提案修正、進捗表示、通知設定
 - データ保持・削除、監視、DLQ、総合障害試験
@@ -153,6 +153,7 @@ PF-01の対象外:
 - PL-01C（週間計画画面・初回承認）は完了。実装記録は`docs/next-session-pl-01c.md`を参照する。
 - PL-01D（実績照合）は完了。実装記録は`docs/next-session-pl-01d.md`を参照する。
 - PL-01E（Workout Review・Readiness）は完了。実装記録は`docs/next-session-pl-01e.md`を参照する。
+- PL-01F（承認付き再計画）は完了。実装記録は`docs/next-session-pl-01f.md`を参照する。
 - 計画の所有主体はapp userとし、Strava未連携・手動Activityのみでも利用可能にする。
 - 安全上`blocked`となった元メニューは、ユーザーが代替案を拒否しても実施可能扱いへ戻さない。
 

@@ -1,5 +1,5 @@
 import logging
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Literal
 from urllib.parse import parse_qs, quote
@@ -33,7 +33,19 @@ from app.oauth import InvalidOAuthState, OAuthStateSigner, strava_authorization_
 from app.oauth_service import StravaOAuthService, UnknownOAuthSession
 from app.plan_approval import PlanApprovalError, PlanApprovalService
 from app.plan_generation import WeeklyPlanGenerationService
-from app.planning import ReadinessStatus, ReconciliationStatus, TrainingSettingsService
+from app.plan_revision import (
+    PlanRevisionError,
+    PlanRevisionService,
+    RequestedAdjustment,
+    RevisionReason,
+    RevisionScope,
+)
+from app.planning import (
+    ReadinessStatus,
+    ReconciliationStatus,
+    TrainingSettingsService,
+    UserTrainingProfile,
+)
 from app.profile import (
     ACTIVITY_PLACES,
     ENVIRONMENT_ALIASES,
@@ -171,6 +183,25 @@ class WeeklyPlanDecisionInput(BaseModel):
     action_token: str = Field(min_length=1, max_length=2048)
 
 
+class PlanRevisionRequestInput(BaseModel):
+    base_plan_id: str = Field(min_length=1, max_length=128)
+    scope: RevisionScope
+    effective_date: date | None = None
+    reason_code: RevisionReason
+    requested_adjustment: RequestedAdjustment
+    note: str = Field(default="", max_length=500)
+    readiness_assessment_id: str | None = Field(default=None, max_length=128)
+    operation_id: str = Field(
+        min_length=1, max_length=128, pattern=r"^[A-Za-z0-9_.:-]+$"
+    )
+
+
+class PlanRevisionDecisionInput(BaseModel):
+    proposal_id: str = Field(min_length=1, max_length=128)
+    decision: Literal["approve", "reject", "repropose"]
+    action_token: str = Field(min_length=1, max_length=2048)
+
+
 class MissingWorkoutScanTask(BaseModel):
     user_id: str = Field(min_length=1, max_length=128)
     line_user_id: str = Field(min_length=1, max_length=128)
@@ -204,6 +235,18 @@ def _plan_approval_service() -> PlanApprovalService:
         runtime.planning_history,
         runtime.active_plan_pointers,
         runtime.plan_action_signer,
+    )
+
+
+def _plan_revision_service() -> PlanRevisionService:
+    return PlanRevisionService(
+        runtime.revision_generator,
+        runtime.planning_history,
+        runtime.revision_history,
+        runtime.revision_approval_states,
+        runtime.active_plan_pointers,
+        runtime.training_settings_state,
+        runtime.revision_action_signer,
     )
 
 
@@ -270,11 +313,31 @@ async def create_weekly_plan_url(line_user_id: str) -> str:
     service = _plan_approval_service()
     plan = await service.current_for_line(line_user_id)
     if plan is None:
+        plan = await _active_plan_for_line(line_user_id)
+    else:
+        await service.present(plan)
+    if plan is None:
         raise PlanApprovalError("確認できる週間計画はまだありません。")
-    await service.present(plan)
     token, link = _weekly_plan_signer().create_link(line_user_id, plan.id, plan.version)
     await runtime.weekly_plan_links.create(link)
     return f"{base_url.rstrip('/')}/weekly-plan/start?token={quote(token)}"
+
+
+async def _active_plan_for_line(line_user_id: str):
+    profile = await runtime.training_settings_state.get_profile(line_user_id)
+    if profile is None:
+        profile = UserTrainingProfile(
+            user_id=line_user_id, operation_id="weekly-plan-active-default"
+        )
+    week_start = profile.local_week_start(datetime.now(UTC))
+    for candidate_week in (week_start, week_start + timedelta(days=7)):
+        plan_id = await runtime.active_plan_pointers.get(line_user_id, candidate_week)
+        if plan_id is None:
+            continue
+        plan = await runtime.planning_history.get_plan(plan_id)
+        if plan is not None and plan.line_user_id == line_user_id:
+            return plan
+    return None
 
 
 async def send_weekly_plan_link(line_user_id: str) -> None:
@@ -634,7 +697,12 @@ async def get_weekly_plan(request: Request, response: Response) -> dict[str, obj
     approval = await runtime.plan_approval_states.get_current(
         plan.user_id, line_user_id
     )
-    if approval is None or approval.plan_id != plan.id:
+    if approval is not None and approval.plan_id != plan.id:
+        approval = None
+    is_active = (
+        await runtime.active_plan_pointers.get(plan.user_id, plan.week_start) == plan.id
+    )
+    if approval is None and not is_active:
         raise HTTPException(
             status_code=409, detail="この週間計画は現在操作できません。"
         )
@@ -652,7 +720,7 @@ async def get_weekly_plan(request: Request, response: Response) -> dict[str, obj
         else:
             previous_plan = None
     response.headers["Cache-Control"] = "no-store"
-    return build_weekly_plan_dto(
+    result = build_weekly_plan_dto(
         plan=plan,
         workouts=workouts,
         approval=approval,
@@ -660,6 +728,8 @@ async def get_weekly_plan(request: Request, response: Response) -> dict[str, obj
         previous_plan=previous_plan,
         previous_workouts=previous_workouts,
     )
+    result["revision"] = {"enabled": is_active and approval is None}
+    return result
 
 
 @app.post("/weekly-plan/api/decision")
@@ -694,6 +764,101 @@ async def decide_weekly_plan(
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     response.headers["Cache-Control"] = "no-store"
     return {"status": status}
+
+
+async def _revision_dto(proposal) -> dict[str, object]:
+    state = await runtime.revision_approval_states.get(proposal.id)
+    if state is None:
+        raise PlanRevisionError("Revision approval state not found")
+    return {
+        "id": proposal.id,
+        "request_id": proposal.request_id,
+        "revision": proposal.revision,
+        "base_plan_id": proposal.base_plan_id,
+        "base_plan_version": proposal.base_plan_version,
+        "proposed_plan_id": proposal.proposed_plan_id,
+        "proposed_plan_version": proposal.proposed_plan_version,
+        "scope": proposal.scope.value,
+        "effective_date": proposal.effective_date.isoformat(),
+        "diff": proposal.diff,
+        "safety_flags": proposal.safety_flags,
+        "expires_at": state.expires_at.isoformat(),
+        "actions": await _plan_revision_service().approval_payload(proposal),
+    }
+
+
+@app.post("/weekly-plan/api/revisions")
+async def request_plan_revision(
+    request: Request,
+    response: Response,
+    payload: PlanRevisionRequestInput,
+) -> dict[str, object]:
+    line_user_id, session_plan_id, session_version = _weekly_plan_session(request)
+    _check_weekly_plan_origin(request)
+    if payload.base_plan_id != session_plan_id:
+        raise HTTPException(
+            status_code=403, detail="週間計画の参照sessionが一致しません。"
+        )
+    plan = await runtime.planning_history.get_plan(session_plan_id)
+    if (
+        plan is None
+        or plan.line_user_id != line_user_id
+        or plan.version != session_version
+    ):
+        raise HTTPException(
+            status_code=403, detail="週間計画の所有者を確認できません。"
+        )
+    try:
+        proposal = await _plan_revision_service().request_revision(
+            user_id=plan.user_id,
+            line_user_id=line_user_id,
+            base_plan_id=plan.id,
+            scope=payload.scope,
+            effective_date=payload.effective_date,
+            reason_code=payload.reason_code,
+            requested_adjustment=payload.requested_adjustment,
+            note=payload.note,
+            readiness_assessment_id=payload.readiness_assessment_id,
+            operation_id=payload.operation_id,
+        )
+        result = await _revision_dto(proposal)
+    except PlanRevisionError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    response.headers["Cache-Control"] = "no-store"
+    return result
+
+
+@app.post("/weekly-plan/api/revisions/decision")
+async def decide_plan_revision(
+    request: Request,
+    response: Response,
+    payload: PlanRevisionDecisionInput,
+) -> dict[str, object]:
+    line_user_id, session_plan_id, session_version = _weekly_plan_session(request)
+    _check_weekly_plan_origin(request)
+    proposal = await runtime.revision_history.get_proposal(payload.proposal_id)
+    if (
+        proposal is None
+        or proposal.base_plan_id != session_plan_id
+        or proposal.base_plan_version != session_version
+    ):
+        raise HTTPException(
+            status_code=403, detail="週間計画の参照sessionが一致しません。"
+        )
+    try:
+        status, replacement = await _plan_revision_service().decide(
+            proposal_id=payload.proposal_id,
+            line_user_id=line_user_id,
+            decision=payload.decision,
+            action_token=payload.action_token,
+        )
+        result: dict[str, object] = {"status": status}
+        if replacement is not None:
+            result["proposal"] = await _revision_dto(replacement)
+    except PlanRevisionError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    response.headers["Cache-Control"] = "no-store"
+    return result
 
 
 @app.get("/webhooks/strava")

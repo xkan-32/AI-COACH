@@ -191,7 +191,7 @@ def build_weekly_plan_dto(
     *,
     plan: TrainingPlanVersion,
     workouts: list[PlannedWorkout],
-    approval: PlanApprovalState,
+    approval: PlanApprovalState | None,
     action_signer: PlanActionSigner,
     previous_plan: TrainingPlanVersion | None = None,
     previous_workouts: list[PlannedWorkout] | None = None,
@@ -210,22 +210,26 @@ def build_weekly_plan_dto(
                 "changes": _daily_changes(current, previous),
             }
         )
-    actions = {
-        decision: action_signer.create(
-            plan.id,
-            plan.version,
-            approval.line_user_id,
-            decision,  # type: ignore[arg-type]
-            approval.expires_at,
-        )
-        for decision in ("approve", "reject", "repropose")
-    }
+    actions = (
+        {
+            decision: action_signer.create(
+                plan.id,
+                plan.version,
+                approval.line_user_id,
+                decision,  # type: ignore[arg-type]
+                approval.expires_at,
+            )
+            for decision in ("approve", "reject", "repropose")
+        }
+        if approval is not None
+        else {}
+    )
     return {
         "plan": {
             "id": plan.id,
             "week_start": plan.week_start.isoformat(),
             "version": plan.version,
-            "status": approval.status.value,
+            "status": approval.status.value if approval is not None else "active",
             "rationale": plan.plan_rationale,
             "safety_constraints": list(plan.safety_flags),
             "previous_version": previous_plan.version if previous_plan else None,
@@ -234,10 +238,11 @@ def build_weekly_plan_dto(
             ),
             "days": days,
         },
-        "approval": {
-            "expires_at": approval.expires_at.isoformat(),
-            "actions": actions,
-        },
+        "approval": (
+            {"expires_at": approval.expires_at.isoformat(), "actions": actions}
+            if approval is not None
+            else None
+        ),
     }
 
 
