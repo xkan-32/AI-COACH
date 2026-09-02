@@ -90,6 +90,14 @@ BigQuery is used for immutable history and analysis. Firestore is used for OAuth
 - Activity Description、Condition自由記述、GPS、生stream、route hashはAI入力へ含めない。
 - shadow結果は`draft`、日次処方、Safety Gate、lifecycle eventとしてBigQueryへappend-only保存する。active pointer、通知、Schedulerは変更しない。
 
+## PL-01C 週間計画画面・初回承認
+
+- リッチメニューの進捗領域から、10分有効のワンタイムURLを発行し、計画ID・version・LINE所有者を束縛したHttpOnly sessionへ交換する。
+- Web DTOは7日分の処方、理由、安全制約、version差分だけをallow-listで返し、AI入力snapshotや健康自由記述を公開しない。
+- 承認、却下、別案依頼にはsessionに加え、decisionを束縛した期限付きHMAC tokenを要求する。
+- Firestoreの承認stateは週開始日とversionを含むpending pointerをCAS更新し、古い週・旧version・二重操作を拒否する。
+- `TrainingPlanVersion`の作成時statusは不変のまま保持し、有効状態はlifecycle eventを正本とする。承認時だけ既存rowを再保存せずactive pointerを切り替える。
+
 ## AC-01 詳細Activity・負荷解析
 
 - Run、Walk、Ride系Activityではdetail、laps、streamsをCloud Tasks worker内で取得する。非対応種目はActivity summaryから安全に処理する。

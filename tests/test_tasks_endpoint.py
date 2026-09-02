@@ -15,6 +15,7 @@ def test_line_event_worker_routes_every_rich_menu_action(target: str) -> None:
     runtime.messenger.texts.clear()
     runtime.messenger.quick_replies.clear()
     runtime.messenger.settings_links.clear()
+    runtime.messenger.weekly_plan_links.clear()
     response = client.post(
         "/tasks/line/events",
         json={
@@ -35,6 +36,11 @@ def test_line_event_worker_routes_every_rich_menu_action(target: str) -> None:
         assert (
             "/settings/profile/start?token=" in runtime.messenger.settings_links[0][1]
         )
+    elif target == "progress":
+        assert runtime.messenger.weekly_plan_links == []
+        assert runtime.messenger.texts == [
+            ("U-menu", "確認できる週間計画はまだありません。")
+        ]
     else:
         assert runtime.messenger.texts == [("U-menu", MENU_MESSAGES[target])]
 

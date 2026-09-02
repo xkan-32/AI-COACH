@@ -479,6 +479,8 @@ AI実行前に制約を作り、AI出力後にも同じ制約で検証する。�
 
 ### PL-01C 週間計画画面と初回承認
 
+実装済み。署名付きワンタイムWeb導線、承認状態CAS、lifecycle eventとactive pointerの不変性は`docs/next-session-pl-01c.md`を参照する。
+
 - 署名・期限付きWeb画面で7日分、理由、安全制約、version差分を表示する。
 - 計画全体の承認、拒否、再提案を実装し、承認時だけactive pointerを切り替える。
 

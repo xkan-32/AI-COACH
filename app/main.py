@@ -1,6 +1,7 @@
 import logging
 from datetime import UTC, date, datetime
 from pathlib import Path
+from typing import Literal
 from urllib.parse import parse_qs, quote
 
 from fastapi import FastAPI, HTTPException, Query, Request, Response
@@ -28,6 +29,7 @@ from app.ingestion import ActivityIngestionService, UnknownAthleteToken
 from app.line_menu import MenuActionError, MenuActionRouter
 from app.oauth import InvalidOAuthState, OAuthStateSigner, strava_authorization_url
 from app.oauth_service import StravaOAuthService, UnknownOAuthSession
+from app.plan_approval import PlanApprovalError, PlanApprovalService
 from app.plan_generation import WeeklyPlanGenerationService
 from app.planning import TrainingSettingsService
 from app.profile import (
@@ -49,6 +51,11 @@ from app.security import (
 )
 from app.strava import StravaApiError, StravaOAuthClient, StravaOAuthError
 from app.web_settings import InvalidSettingsToken, SettingsTokenSigner
+from app.web_weekly_plan import (
+    InvalidWeeklyPlanToken,
+    WeeklyPlanWebSigner,
+    build_weekly_plan_dto,
+)
 from app.webhooks import verify_line_signature
 
 logger = logging.getLogger(__name__)
@@ -57,6 +64,8 @@ app = FastAPI(title="AI Training Coach", version="0.3.0")
 runtime = build_runtime(get_settings())
 SETTINGS_COOKIE = "profile_settings_session"
 SETTINGS_PAGE = Path(__file__).parent / "static" / "profile-settings.html"
+WEEKLY_PLAN_COOKIE = "weekly_plan_session"
+WEEKLY_PLAN_PAGE = Path(__file__).parent / "static" / "weekly-plan.html"
 
 
 class GoalInput(BaseModel):
@@ -139,8 +148,46 @@ class WeeklyPlanGenerationTask(BaseModel):
         return value.astimezone(UTC)
 
 
+class WeeklyPlanDecisionInput(BaseModel):
+    plan_id: str = Field(min_length=1, max_length=128)
+    version: int = Field(ge=1)
+    decision: Literal["approve", "reject", "repropose"]
+    action_token: str = Field(min_length=1, max_length=2048)
+
+
 def _settings_signer() -> SettingsTokenSigner:
     return SettingsTokenSigner(get_settings().oauth_state_signing_key)
+
+
+def _weekly_plan_signer() -> WeeklyPlanWebSigner:
+    return WeeklyPlanWebSigner(get_settings().oauth_state_signing_key)
+
+
+def _plan_approval_service() -> PlanApprovalService:
+    return PlanApprovalService(
+        runtime.plan_approval_states,
+        runtime.planning_history,
+        runtime.active_plan_pointers,
+        runtime.plan_action_signer,
+    )
+
+
+def _weekly_plan_session(request: Request) -> tuple[str, str, int]:
+    try:
+        return _weekly_plan_signer().verify_session(
+            request.cookies.get(WEEKLY_PLAN_COOKIE, "")
+        )
+    except InvalidWeeklyPlanToken as exc:
+        raise HTTPException(
+            status_code=401, detail="週間計画をLINEから開き直してください。"
+        ) from exc
+
+
+def _check_weekly_plan_origin(request: Request) -> None:
+    configured = get_settings().worker_url.rstrip("/")
+    origin = request.headers.get("origin", "").rstrip("/")
+    if configured and origin != configured:
+        raise HTTPException(status_code=403, detail="Invalid origin")
 
 
 def _settings_user(request: Request) -> str:
@@ -175,6 +222,29 @@ async def create_profile_settings_url(line_user_id: str) -> str:
 async def send_profile_settings_link(line_user_id: str) -> None:
     await runtime.messenger.send_settings_link(
         line_user_id, await create_profile_settings_url(line_user_id)
+    )
+
+
+async def create_weekly_plan_url(line_user_id: str) -> str:
+    settings = get_settings()
+    base_url = settings.worker_url or (
+        "http://testserver" if settings.app_env == "local" else ""
+    )
+    if not base_url:
+        raise PlanApprovalError("週間計画画面は現在利用できません。")
+    service = _plan_approval_service()
+    plan = await service.current_for_line(line_user_id)
+    if plan is None:
+        raise PlanApprovalError("確認できる週間計画はまだありません。")
+    await service.present(plan)
+    token, link = _weekly_plan_signer().create_link(line_user_id, plan.id, plan.version)
+    await runtime.weekly_plan_links.create(link)
+    return f"{base_url.rstrip('/')}/weekly-plan/start?token={quote(token)}"
+
+
+async def send_weekly_plan_link(line_user_id: str) -> None:
+    await runtime.messenger.send_weekly_plan_link(
+        line_user_id, await create_weekly_plan_url(line_user_id)
     )
 
 
@@ -302,6 +372,135 @@ async def update_profile_settings(
             detail="設定が更新されています。ページを開き直してください。",
         ) from exc
     return {"status": "saved", "revision": revision}
+
+
+@app.get("/weekly-plan/start")
+async def start_weekly_plan(token: str) -> RedirectResponse:
+    try:
+        nonce = _weekly_plan_signer().verify_link(token)
+    except InvalidWeeklyPlanToken as exc:
+        raise HTTPException(
+            status_code=400, detail="週間計画リンクが無効か期限切れです。"
+        ) from exc
+    link = await runtime.weekly_plan_links.consume(nonce, datetime.now(UTC))
+    if link is None:
+        raise HTTPException(
+            status_code=400, detail="週間計画リンクが無効か使用済みです。"
+        )
+    plan = await runtime.planning_history.get_plan(link.plan_id)
+    if (
+        plan is None
+        or plan.line_user_id != link.line_user_id
+        or plan.version != link.version
+    ):
+        raise HTTPException(
+            status_code=403, detail="週間計画の所有者を確認できません。"
+        )
+    response = RedirectResponse("/weekly-plan", status_code=303)
+    response.set_cookie(
+        WEEKLY_PLAN_COOKIE,
+        _weekly_plan_signer().create_session(link),
+        max_age=30 * 60,
+        httponly=True,
+        secure=get_settings().app_env != "local",
+        samesite="strict",
+        path="/weekly-plan",
+    )
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+@app.get("/weekly-plan", response_class=FileResponse)
+async def weekly_plan_page(request: Request) -> FileResponse:
+    _weekly_plan_session(request)
+    response = FileResponse(WEEKLY_PLAN_PAGE, media_type="text/html")
+    response.headers.update(
+        {
+            "Cache-Control": "no-store",
+            "Content-Security-Policy": (
+                "default-src 'self'; style-src 'self' 'unsafe-inline'; "
+                "script-src 'self' 'unsafe-inline'; img-src 'self' data:; "
+                "connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; "
+                "form-action 'self'"
+            ),
+            "X-Frame-Options": "DENY",
+            "X-Content-Type-Options": "nosniff",
+        }
+    )
+    return response
+
+
+@app.get("/weekly-plan/api")
+async def get_weekly_plan(request: Request, response: Response) -> dict[str, object]:
+    line_user_id, plan_id, version = _weekly_plan_session(request)
+    plan = await runtime.planning_history.get_plan(plan_id)
+    if plan is None or plan.line_user_id != line_user_id or plan.version != version:
+        raise HTTPException(
+            status_code=403, detail="週間計画の所有者を確認できません。"
+        )
+    approval = await runtime.plan_approval_states.get_current(
+        plan.user_id, line_user_id
+    )
+    if approval is None or approval.plan_id != plan.id:
+        raise HTTPException(
+            status_code=409, detail="この週間計画は現在操作できません。"
+        )
+    workouts = await runtime.planning_history.list_workouts(plan.id)
+    previous_plan = None
+    previous_workouts = []
+    if plan.supersedes_plan_version_id:
+        previous_plan = await runtime.planning_history.get_plan(
+            plan.supersedes_plan_version_id
+        )
+        if previous_plan is not None and previous_plan.user_id == plan.user_id:
+            previous_workouts = await runtime.planning_history.list_workouts(
+                previous_plan.id
+            )
+        else:
+            previous_plan = None
+    response.headers["Cache-Control"] = "no-store"
+    return build_weekly_plan_dto(
+        plan=plan,
+        workouts=workouts,
+        approval=approval,
+        action_signer=runtime.plan_action_signer,
+        previous_plan=previous_plan,
+        previous_workouts=previous_workouts,
+    )
+
+
+@app.post("/weekly-plan/api/decision")
+async def decide_weekly_plan(
+    request: Request,
+    response: Response,
+    payload: WeeklyPlanDecisionInput,
+) -> dict[str, str]:
+    line_user_id, session_plan_id, session_version = _weekly_plan_session(request)
+    _check_weekly_plan_origin(request)
+    if payload.plan_id != session_plan_id or payload.version != session_version:
+        raise HTTPException(
+            status_code=403, detail="週間計画の参照sessionが一致しません。"
+        )
+    plan = await runtime.planning_history.get_plan(payload.plan_id)
+    if (
+        plan is None
+        or plan.line_user_id != line_user_id
+        or plan.version != payload.version
+    ):
+        raise HTTPException(
+            status_code=403, detail="週間計画の所有者を確認できません。"
+        )
+    try:
+        status, _ = await _plan_approval_service().decide(
+            plan=plan,
+            line_user_id=line_user_id,
+            decision=payload.decision,
+            action_token=payload.action_token,
+        )
+    except PlanApprovalError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    response.headers["Cache-Control"] = "no-store"
+    return {"status": status}
 
 
 @app.get("/webhooks/strava")
@@ -458,6 +657,7 @@ async def generate_weekly_plan_task(
         runtime.activities,
         runtime.condition_reports,
         settings.vertex_model,
+        _plan_approval_service(),
     )
     try:
         result = await service.generate_shadow_plan(
@@ -600,7 +800,9 @@ async def process_line_event(event: dict) -> None:
         runtime.messenger,
         on_settings_requested=send_profile_settings_link,
     )
-    menu_actions = MenuActionRouter(runtime.messenger)
+    menu_actions = MenuActionRouter(
+        runtime.messenger, on_progress_requested=send_weekly_plan_link
+    )
     event_type = event.get("type")
     line_user_id = event.get("source", {}).get("userId", "")
     try:
@@ -658,7 +860,12 @@ async def process_line_event(event: dict) -> None:
             line_user_id,
             "この操作は期限切れか無効です。最新のメッセージから操作してください。",
         )
-    except (InvalidConditionAction, MenuActionError, ProfileCommandError) as exc:
+    except (
+        InvalidConditionAction,
+        MenuActionError,
+        PlanApprovalError,
+        ProfileCommandError,
+    ) as exc:
         await runtime.messenger.send_text(line_user_id, str(exc))
 
 

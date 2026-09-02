@@ -99,6 +99,20 @@ class LineConditionPromptSender:
             },
         )
 
+    async def send_weekly_plan_link(self, line_user_id: str, url: str) -> None:
+        await self._push(
+            line_user_id,
+            {
+                "type": "template",
+                "altText": "週間トレーニング計画を確認します。",
+                "template": {
+                    "type": "buttons",
+                    "text": "7日分の計画、理由、安全制約を確認して承認できます。",
+                    "actions": [{"type": "uri", "label": "週間計画を開く", "uri": url}],
+                },
+            },
+        )
+
     async def send_proposal(self, line_user_id: str, proposal: WorkoutProposal) -> None:
         items = [
             {
@@ -173,6 +187,7 @@ class InMemoryConditionPromptSender:
         self.proposals: list[tuple[str, WorkoutProposal]] = []
         self.quick_replies: list[tuple[str, str, list[tuple[str, str]]]] = []
         self.settings_links: list[tuple[str, str]] = []
+        self.weekly_plan_links: list[tuple[str, str]] = []
 
     async def send(self, line_user_id: str, activity: Activity) -> None:
         self.sent.append((line_user_id, activity))
@@ -187,6 +202,9 @@ class InMemoryConditionPromptSender:
 
     async def send_settings_link(self, line_user_id: str, url: str) -> None:
         self.settings_links.append((line_user_id, url))
+
+    async def send_weekly_plan_link(self, line_user_id: str, url: str) -> None:
+        self.weekly_plan_links.append((line_user_id, url))
 
     async def send_proposal(self, line_user_id: str, proposal: WorkoutProposal) -> None:
         self.proposals.append((line_user_id, proposal))
