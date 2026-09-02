@@ -246,6 +246,58 @@ async def test_environment_multi_select_can_toggle_before_completion() -> None:
     assert await resources.list("line-1") == []
 
 
+async def test_environment_change_uses_picker_without_id_or_name_prompt() -> None:
+    goals, resources, drafts = (
+        InMemoryGoalStore(),
+        InMemoryTrainingResourceStore(),
+        InMemoryProfileDraftStore(),
+    )
+    messenger = InMemoryConditionPromptSender()
+    workflow = ProfileWorkflow(goals, resources, drafts, messenger)
+    await resources.replace("line-1", ["ダンベル"])
+
+    await workflow.handle_postback(
+        "line-1", "action=profile&section=environments&operation=change"
+    )
+    assert messenger.texts == []
+    target_action = messenger.quick_replies[-1][2][0][1]
+    await workflow.handle_postback("line-1", target_action)
+    assert messenger.texts == []
+    assert [label for label, _ in messenger.quick_replies[-1][2]] == [
+        "場所・種目",
+        "器具",
+        "その他",
+        "キャンセル",
+    ]
+
+    equipment_action = messenger.quick_replies[-1][2][1][1]
+    await workflow.handle_postback("line-1", equipment_action)
+    machine_action = next(
+        action for label, action in messenger.quick_replies[-1][2] if label == "マシン"
+    )
+    await workflow.handle_postback("line-1", machine_action)
+
+    assert [item.display_name for item in await resources.list("line-1")] == ["マシン"]
+    assert await drafts.get("line-1") is None
+
+
+async def test_environment_deactivate_does_not_ask_for_id() -> None:
+    goals, resources, drafts = (
+        InMemoryGoalStore(),
+        InMemoryTrainingResourceStore(),
+        InMemoryProfileDraftStore(),
+    )
+    messenger = InMemoryConditionPromptSender()
+    workflow = ProfileWorkflow(goals, resources, drafts, messenger)
+    await resources.replace("line-1", ["自重"])
+    await workflow.handle_postback(
+        "line-1", "action=profile&section=environments&operation=deactivate"
+    )
+    assert messenger.texts == []
+    await workflow.handle_postback("line-1", messenger.quick_replies[-1][2][0][1])
+    assert await resources.list("line-1") == []
+
+
 async def test_expired_draft_is_deleted() -> None:
     goals, resources, drafts = (
         InMemoryGoalStore(),

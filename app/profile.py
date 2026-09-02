@@ -578,7 +578,9 @@ class ProfileWorkflow:
             return
         if operation == "add":
             await self._drafts.delete(user)
-            await self.handle_text(user, "目標追加")
+            await self._drafts.save(
+                ProfileDraft(user, str(uuid.uuid4()), "goal_add", "priority")
+            )
             await self._messenger.send_quick_reply(
                 user,
                 "主目標または副目標を選んでください。",
@@ -610,8 +612,14 @@ class ProfileWorkflow:
             return
         if operation in {"change", "deactivate"}:
             await self._drafts.delete(user)
-            await self.handle_text(
-                user, "目標変更" if operation == "change" else "目標無効化"
+            await self._drafts.save(
+                ProfileDraft(
+                    user,
+                    str(uuid.uuid4()),
+                    "goal_change" if operation == "change" else "goal_deactivate",
+                    "id",
+                    {"ui": "1"},
+                )
             )
             goals = await self._goals.list(user)
             if not goals:
@@ -716,8 +724,16 @@ class ProfileWorkflow:
             return
         if operation in {"change", "deactivate"}:
             await self._drafts.delete(user)
-            await self.handle_text(
-                user, "運動環境変更" if operation == "change" else "運動環境無効化"
+            await self._drafts.save(
+                ProfileDraft(
+                    user,
+                    str(uuid.uuid4()),
+                    "environment_change"
+                    if operation == "change"
+                    else "environment_deactivate",
+                    "id",
+                    {"ui": "1"},
+                )
             )
             resources = await self._resources.list(user)
             if not resources:
@@ -737,11 +753,78 @@ class ProfileWorkflow:
             )
             return
         if operation == "select":
+            draft = await self._active_draft(user)
+            await self._continue(user, values.get("value", ""), draft)
+            if draft.action == "environment_change" and draft.step == "id":
+                await self._show_environment_replacement_groups(user)
+            return
+        if operation == "replace_group":
+            group = values.get("value", "")
+            presets = (
+                sorted(ACTIVITY_PLACES if group == "activity_place" else EQUIPMENT)
+                if group in {"activity_place", "equipment"}
+                else []
+            )
+            if not presets:
+                raise ProfileCommandError("運動環境の種類を確認できませんでした。")
+            await self._messenger.send_quick_reply(
+                user,
+                "新しい項目を選んでください。",
+                [
+                    (
+                        name,
+                        profile_action("environments", "replace_select", value=name),
+                    )
+                    for name in presets
+                ]
+                + [
+                    (
+                        "種類選択へ戻る",
+                        profile_action("environments", "replace_groups"),
+                    ),
+                    ("キャンセル", profile_action("environments", "cancel")),
+                ],
+            )
+            return
+        if operation == "replace_groups":
+            await self._show_environment_replacement_groups(user)
+            return
+        if operation == "replace_select":
             await self._continue(
                 user, values.get("value", ""), await self._active_draft(user)
             )
             return
+        if operation == "replace_other":
+            await self._messenger.send_text(
+                user, "新しい運動環境名を入力してください。"
+            )
+            return
         raise ProfileCommandError("選択された運動環境操作を確認できませんでした。")
+
+    async def _show_environment_replacement_groups(self, user: str) -> None:
+        draft = await self._active_draft(user)
+        if draft.action != "environment_change" or draft.step != "name":
+            raise ProfileCommandError(
+                "変更状態を確認できません。メニューからやり直してください。"
+            )
+        await self._messenger.send_quick_reply(
+            user,
+            "新しい種類を選んでください。",
+            [
+                (
+                    "場所・種目",
+                    profile_action(
+                        "environments", "replace_group", value="activity_place"
+                    ),
+                ),
+                (
+                    "器具",
+                    profile_action("environments", "replace_group", value="equipment"),
+                ),
+                ("その他", profile_action("environments", "replace_other")),
+                ("キャンセル", profile_action("environments", "cancel")),
+            ],
+        )
 
     def _selected_environments(self, draft: ProfileDraft) -> list[str]:
         try:
@@ -992,7 +1075,7 @@ class ProfileWorkflow:
                         draft.operation_id,
                         draft.action,
                         "target",
-                        {"id": matches[0].id},
+                        {**values, "id": matches[0].id},
                         draft.expires_at,
                     )
                 )
@@ -1023,13 +1106,14 @@ class ProfileWorkflow:
                         draft.operation_id,
                         draft.action,
                         "name",
-                        {"id": matches[0].id},
+                        {**values, "id": matches[0].id},
                         draft.expires_at,
                     )
                 )
-                await self._messenger.send_text(
-                    user, "新しい場所・種目・器具名を入力してください。"
-                )
+                if values.get("ui") != "1":
+                    await self._messenger.send_text(
+                        user, "新しい場所・種目・器具名を入力してください。"
+                    )
             return
         if (
             draft.action == "environment_add"
