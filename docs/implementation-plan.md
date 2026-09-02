@@ -70,6 +70,17 @@ Exit: LINEから目標・運動環境を安全かつ冪等に管理でき、次�
 
 Exit: 週間AI生成、自動照合、未達理由対話、note adapterを後方互換で接続でき、公開には常に別のLINE明示承認を要求できる。
 
+### Phase 2.7 - Weekly plan generation shadow mode（実装済み）
+
+- 翌週月曜から日曜までを対象とするVertex AI構造化出力
+- 稼働可能時間、運動環境、直近負荷、体調codeを使う決定論的な事前制約と事後検証
+- AI障害、不正出力、安全違反時の保守的な7日分fallback
+- `user_id + week_start + generation_reason + input_revision`による手動workerの重複排除
+- draft、PlannedWorkout、SafetyGate、lifecycle eventをBigQuery不変履歴へ保存し、active pointerは更新しない
+- GPS、生stream、route hash、Activity Description、体調自由記述をAI入力から除外
+
+Exit: 自動Schedulerと通知を有効にせず、安全な週間draftを手動shadow生成して監査できる。
+
 ### Phase 3 - Approval and Strava update（実装済み）
 
 - Send proposal with approve/reject actions and an expiring signed action token

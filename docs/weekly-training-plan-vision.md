@@ -471,6 +471,8 @@ AI実行前に制約を作り、AI出力後にも同じ制約で検証する。�
 
 ### PL-01B 週間計画生成
 
+実装済み。手動shadow worker、AI入出力、安全検証、fallback、監査項目は`docs/next-session-pl-01b.md`を参照する。
+
 - 手動起動・shadow modeで翌週計画案を生成する。
 - 構造化AI出力、決定論的な事前制約・事後検証、fallbackを実装する。
 - まだ自動Schedulerや本番通知は有効にしない。

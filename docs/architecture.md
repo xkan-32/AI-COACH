@@ -63,7 +63,7 @@ BigQuery is used for immutable history and analysis. Firestore is used for OAuth
 - 週間計画は上書きせず、週・athlete・versionから決定的に識別する。Firestoreには週ごとのactive pointerだけを置き、全versionとAI入力snapshotはBigQueryへappend-onlyで保存する。
 - 日次メニューは計画version、日付、sequenceから決定的に識別する。既存の`WorkoutProposal`はnullableな計画FKを持ち、未計画の日次提案も後方互換で扱う。
 - 実績照合はStravaと将来のmanual activityを同じ境界で扱い、matcher versionと客観的な差分を保持する。
-- Reviewは客観要因、体調、対話由来要因を分離し、次計画向けfeedback codeとAI／rule versionを残す。AIによる週間生成、自動照合、未達理由対話は後続機能で接続する。
+- Reviewは客観要因、体調、対話由来要因を分離し、次計画向けfeedback codeとAI／rule versionを残す。週間shadow生成は接続済みで、自動照合と未達理由対話は後続機能で接続する。
 
 ## 外部公開承認境界
 
@@ -81,6 +81,14 @@ BigQuery is used for immutable history and analysis. Firestore is used for OAuth
 - BigQueryには設定version、plan lifecycle event、execution state、Safety Gate、Readinessをappend-onlyで保存する。Firestoreにはprofile現在値、availability active pointer、期限付きpreferences/dated requests、承認済みplan pointerを置く。
 - `PlannedWorkout`は`planned`固定の不変な処方recordである。実施結果は`WorkoutExecutionState`、照合は`WorkoutReconciliation`、評価は`WorkoutReview`へ分離する。
 - 新規active化経路は`pending_approval -> active` eventを必須とする。Safety Gateの`blocked`は変更案の拒否で解除しない。
+
+## PL-01B 週間計画shadow生成
+
+- OIDC認証された手動workerが、目標、稼働可能slot、運動環境、嗜好、日付指定request、直近負荷、Condition codeから7日分の構造化案を生成する。
+- Vertex出力はPydantic schemaと決定論的Safety Gateで再検証する。日付、時間枠、buffer、環境、屋外可否、週間負荷、moderate配置に違反した案は採用しない。
+- AI障害・不正出力・安全違反時は、easy mobilityと休養だけの決定論的fallbackへ切り替える。
+- Activity Description、Condition自由記述、GPS、生stream、route hashはAI入力へ含めない。
+- shadow結果は`draft`、日次処方、Safety Gate、lifecycle eventとしてBigQueryへappend-only保存する。active pointer、通知、Schedulerは変更しない。
 
 ## AC-01 詳細Activity・負荷解析
 

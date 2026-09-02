@@ -332,6 +332,7 @@ class TrainingPlanVersion(ImmutableModel):
     status: TrainingPlanStatus = TrainingPlanStatus.ACTIVE
     goal_snapshot: list[GoalSnapshot]
     change_reason: str = Field(min_length=1)
+    plan_rationale: str = Field(default="", max_length=1000)
     supersedes_plan_version_id: str | None = None
     safety_flags: list[str] = Field(default_factory=list)
     ai_model: str | None = None
@@ -348,19 +349,26 @@ class PlannedWorkout(ImmutableModel):
     user_id: str
     athlete_id: str | None = None
     scheduled_date: date
+    scheduled_start_local_time: time | None = None
+    availability_slot_id: str | None = None
     sequence: int = Field(ge=0)
     workout_type: str = Field(min_length=1)
     target_duration_minutes: int | None = Field(default=None, ge=0)
     target_distance_meters: float | None = Field(default=None, ge=0)
     target_intensity: str
+    outdoors: bool = False
     environment_ids: list[str] = Field(default_factory=list)
     safety_constraints: list[str] = Field(default_factory=list)
+    rationale: str = Field(default="", max_length=500)
     workout_lineage_id: str
     supersedes_planned_workout_id: str | None = None
     status: PlannedWorkoutStatus = PlannedWorkoutStatus.PLANNED
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
     _created_at_is_aware = field_validator("created_at")(_require_utc)
+    _start_time_has_no_offset = field_validator("scheduled_start_local_time")(
+        _require_local_time
+    )
 
 
 class WorkoutReconciliation(ImmutableModel):
@@ -485,6 +493,9 @@ class TrainingSettingsStateStore(Protocol):
     ) -> None: ...
     async def list_preferences(self, user_id: str) -> list[WorkoutPreference]: ...
     async def save_preference(self, preference: WorkoutPreference) -> None: ...
+    async def list_dated_requests(
+        self, user_id: str, start_date: date, end_date: date
+    ) -> list[DatedWorkoutRequest]: ...
     async def save_dated_request(self, request: DatedWorkoutRequest) -> None: ...
 
 
@@ -561,6 +572,20 @@ class InMemoryTrainingSettingsStore(
 
     async def save_preference(self, preference: WorkoutPreference) -> None:
         _save_immutable(self.preferences, preference.id, preference)
+
+    async def list_dated_requests(
+        self, user_id: str, start_date: date, end_date: date
+    ) -> list[DatedWorkoutRequest]:
+        return sorted(
+            [
+                item
+                for item in self.dated_requests.values()
+                if item.user_id == user_id
+                and start_date <= item.local_date <= end_date
+                and item.status == DatedRequestStatus.ACTIVE
+            ],
+            key=lambda item: (-item.priority, item.local_date, item.id),
+        )
 
     async def save_dated_request(self, request: DatedWorkoutRequest) -> None:
         _save_immutable(self.dated_requests, request.id, request)
@@ -711,6 +736,25 @@ class FirestoreTrainingSettingsStateStore:
             raise PlanVersionConflict("Immutable preference already exists")
         await document.set(_firestore_payload(preference))
 
+    async def list_dated_requests(
+        self, user_id: str, start_date: date, end_date: date
+    ) -> list[DatedWorkoutRequest]:
+        snapshots = (
+            await self._client.collection("dated_workout_requests")
+            .where("user_id", "==", user_id)
+            .get()
+        )
+        return sorted(
+            [
+                item
+                for snapshot in snapshots
+                if (item := DatedWorkoutRequest.model_validate(snapshot.to_dict()))
+                and start_date <= item.local_date <= end_date
+                and item.status == DatedRequestStatus.ACTIVE
+            ],
+            key=lambda item: (-item.priority, item.local_date, item.id),
+        )
+
     async def save_dated_request(self, request: DatedWorkoutRequest) -> None:
         document = self._client.collection("dated_workout_requests").document(
             request.id
@@ -799,6 +843,17 @@ class TrainingSettingsService:
             await self._history.save_dated_request(request)
         await self._state.save_dated_request(request)
 
+    async def get_profile(self, user_id: str) -> UserTrainingProfile | None:
+        return await self._state.get_profile(user_id)
+
+    async def get_availability(self, user_id: str) -> WeeklyAvailabilityVersion | None:
+        return await self._state.get_availability(user_id)
+
+    async def list_dated_requests(
+        self, user_id: str, start_date: date, end_date: date
+    ) -> list[DatedWorkoutRequest]:
+        return await self._state.list_dated_requests(user_id, start_date, end_date)
+
     async def effective_preferences(
         self, user_id: str, now: datetime
     ) -> list[WorkoutPreference]:
@@ -832,6 +887,7 @@ class TrainingSettingsService:
 class PlanningHistoryStore(Protocol):
     async def save_plan(self, plan: TrainingPlanVersion) -> None: ...
     async def get_plan(self, plan_id: str) -> TrainingPlanVersion | None: ...
+    async def list_workouts(self, plan_id: str) -> list[PlannedWorkout]: ...
     async def save_workouts(self, workouts: Sequence[PlannedWorkout]) -> None: ...
     async def save_reconciliation(
         self, reconciliation: WorkoutReconciliation
@@ -876,6 +932,16 @@ class InMemoryPlanningHistoryStore:
 
     async def get_plan(self, plan_id: str) -> TrainingPlanVersion | None:
         return self.plans.get(plan_id)
+
+    async def list_workouts(self, plan_id: str) -> list[PlannedWorkout]:
+        return sorted(
+            [
+                item
+                for item in self.workouts.values()
+                if item.plan_version_id == plan_id
+            ],
+            key=lambda item: (item.scheduled_date, item.sequence),
+        )
 
     async def save_workouts(self, workouts: Sequence[PlannedWorkout]) -> None:
         for workout in workouts:
@@ -996,6 +1062,24 @@ class BigQueryPlanningHistoryStore:
         if not values.get("status"):
             values["status"] = TrainingPlanStatus.ACTIVE.value
         return TrainingPlanVersion.model_validate(values)
+
+    async def list_workouts(self, plan_id: str) -> list[PlannedWorkout]:
+        from google.cloud import bigquery
+
+        query = (
+            f"SELECT * FROM `{self._prefix}.planned_workouts` "
+            "WHERE plan_version_id = @plan_id "
+            "ORDER BY scheduled_date, sequence"
+        )
+        config = bigquery.QueryJobConfig(
+            query_parameters=[
+                bigquery.ScalarQueryParameter("plan_id", "STRING", plan_id)
+            ]
+        )
+        rows = await asyncio.to_thread(
+            lambda: list(self._client.query(query, job_config=config).result())
+        )
+        return [PlannedWorkout.model_validate(dict(row.items())) for row in rows]
 
     async def save_workouts(self, workouts: Sequence[PlannedWorkout]) -> None:
         for workout in workouts:
