@@ -51,3 +51,12 @@ The model chooses within a bounded envelope. A deterministic policy can force re
 - Use separate least-privilege service accounts for API and workers.
 - Do not log access tokens, raw authorization headers, or unnecessary health comments.
 - Sign approval postbacks, expire them, and bind them to athlete and proposal IDs.
+
+## PF-01 目標・運動環境
+
+- `goals/{goal_id}` は所有者、主/副、種別、内容、任意期限、`active/paused` を保持する。storeはAI contextへ有効項目だけを返し、主目標の保存時に既存主目標を副目標へ変更する。
+- `training_environments/{environment_id}` は安定ID、所有者、表示名、`activity_place/equipment/other`、`active/inactive`、任意詳細を保持する。旧`training_resources/{line_user_id}.resources`は構造化documentがない場合だけ読み取る。
+- `profile_drafts/{line_user_id}` は操作ID、action、step、途中値、`expires_at`を保持する。`expires_at`はFirestore TTL対象で、アプリ側でも期限を検証する。
+- 会話の最終保存IDにはdraftの操作IDを使う。同じCloud Taskが保存後に再送されても同じdocumentを上書きするため、追加が重複しない。
+- 未定義の運動環境は`other`と詳細へそのまま保持し、推測で既知区分へ分類しない。健康情報や入力本文をapplication logへ出さない。
+- リッチメニューの`goals`と`settings`は既存LINE worker内でPF-01 workflowを開始する。Webhookの署名検証、event予約、Cloud Tasks enqueue、即時200応答は変更しない。

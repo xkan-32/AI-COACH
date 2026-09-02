@@ -22,7 +22,13 @@ def test_line_event_worker_routes_every_rich_menu_action(target: str) -> None:
         },
     )
     assert response.status_code == 200
-    assert runtime.messenger.texts == [("U-menu", MENU_MESSAGES[target])]
+    if target == "goals":
+        assert "目標" in runtime.messenger.texts[0][1]
+        assert "目標追加" in runtime.messenger.texts[-1][1]
+    elif target == "settings":
+        assert "運動環境" in runtime.messenger.texts[-1][1]
+    else:
+        assert runtime.messenger.texts == [("U-menu", MENU_MESSAGES[target])]
 
 
 def test_activity_task_endpoint_rejects_unlinked_athlete() -> None:

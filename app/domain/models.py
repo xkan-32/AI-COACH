@@ -28,6 +28,17 @@ class GoalStatus(StrEnum):
     PAUSED = "paused"
 
 
+class TrainingEnvironmentCategory(StrEnum):
+    ACTIVITY_PLACE = "activity_place"
+    EQUIPMENT = "equipment"
+    OTHER = "other"
+
+
+class TrainingEnvironmentStatus(StrEnum):
+    ACTIVE = "active"
+    INACTIVE = "inactive"
+
+
 class Goal(BaseModel):
     id: str
     goal_type: str = Field(min_length=1, max_length=50)
@@ -35,6 +46,14 @@ class Goal(BaseModel):
     target_date: date | None = None
     priority: GoalPriority
     status: GoalStatus = GoalStatus.ACTIVE
+
+
+class TrainingEnvironment(BaseModel):
+    id: str
+    display_name: str = Field(min_length=1, max_length=100)
+    category: TrainingEnvironmentCategory
+    status: TrainingEnvironmentStatus = TrainingEnvironmentStatus.ACTIVE
+    detail: str | None = Field(default=None, max_length=200)
 
 
 class Activity(BaseModel):
@@ -60,7 +79,7 @@ class ConditionReport(BaseModel):
 
 class CoachingContext(BaseModel):
     goals: list[Goal] = Field(default_factory=list)
-    training_resources: list[str] = Field(default_factory=list)
+    training_resources: list[TrainingEnvironment] = Field(default_factory=list)
     recent_activities: list[Activity] = Field(default_factory=list)
     recent_conditions: list[ConditionReport] = Field(default_factory=list)
 
