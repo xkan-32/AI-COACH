@@ -68,7 +68,7 @@ BigQuery is used for immutable history and analysis. Firestore is used for OAuth
 - 週間計画は上書きせず、週・athlete・versionから決定的に識別する。Firestoreには週ごとのactive pointerだけを置き、全versionとAI入力snapshotはBigQueryへappend-onlyで保存する。
 - 日次メニューは計画version、日付、sequenceから決定的に識別する。既存の`WorkoutProposal`はnullableな計画FKを持ち、未計画の日次提案も後方互換で扱う。
 - 実績照合はStravaと手動Activityを同じ境界で扱い、matcher version、候補score、matching evidence、客観的な差分を保持する。明示link、高信頼度自動照合、曖昧・計画外・重複候補、split、未実施確認、手動訂正まで接続済みである。
-- Reviewは客観要因、体調、対話由来要因を分離し、次計画向けfeedback codeとAI／rule versionを残す。週間shadow生成と実績照合は接続済みで、Workout ReviewとReadinessはPL-01Eで接続する。
+- Reviewは客観要因、体調、対話由来要因を分離し、次計画向けfeedback codeとAI／rule versionを残す。Activity単位の不変Reviewから、次の予定メニュー単位のrevision付きReadinessへ接続済みである。痛み・運動中悪化は決定論的Safety Gateでblockし、AI出力では解除できない。
 
 ## 外部公開承認境界
 
@@ -83,7 +83,15 @@ BigQuery is used for immutable history and analysis. Firestore is used for OAuth
 - `UserTrainingProfile`はIANA timezoneと月曜週開始を保持する。ローカル日付の判定時だけtimezone変換し、保存timestampはUTCとする。timezone変更で過去計画の日付を変換しない。
 - 稼働可能時間は不変な`WeeklyAvailabilityVersion`と複数slotで表現し、Firestore transactionでactive pointerをCAS更新する。日跨ぎslotは拒否して2日に分割し、固定休養日と通常slotの同居を禁止する。
 - explicit/inferred preferenceを分離し、inferredにはconfidence、evidence、確認状態を必須とする。同じ種別にexplicitがある場合はinferredを計画入力から除外する。
-- BigQueryには設定version、plan lifecycle event、execution state、Safety Gate、Readinessをappend-onlyで保存する。Firestoreにはprofile現在値、availability active pointer、期限付きpreferences/dated requests、承認済みplan pointerを置く。
+- BigQueryには設定version、plan lifecycle event、execution state、Review、Safety Gate、Readinessをappend-onlyで保存する。Firestoreにはprofile現在値、availability active pointer、期限付きpreferences/dated requests、承認済みplan pointer、ローカル日付・次予定単位のactive Readiness pointerを置く。
+
+## PL-01E Workout ReviewとReadiness
+
+- 確定済みReconciliationからActivity単位の`WorkoutReview`を作り、客観差分、体調code、対話由来codeを混在させず保存する。
+- 次の`PlannedWorkout`は休養日を含めて順序どおり選び、同日Activityが増えるたびに`NextWorkoutReadinessAssessment`を新revisionとして追加する。
+- 体調未回答は`needs_information`、違和感・疲労は`with_adjustment`、痛み・運動中悪化は`blocked`とする。blockは後続AI判定や再評価で自動解除しない。
+- Vertex AIへ渡すsnapshotはID、予定処方、差分、列挙codeだけとし、GPS、生stream、route hash、Description、健康自由記述、部位自由記述を含めない。
+- 従来の翌日提案にはplan、予定、Reviewの参照を付ける。計画変更は行わず、変更案のversion化と承認はPL-01Fへ分離する。
 - `PlannedWorkout`は`planned`固定の不変な処方recordである。実施結果は`WorkoutExecutionState`、照合は`WorkoutReconciliation`、評価は`WorkoutReview`へ分離する。
 - 新規active化経路は`pending_approval -> active` eventを必須とする。Safety Gateの`blocked`は変更案の拒否で解除しない。
 

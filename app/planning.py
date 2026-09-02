@@ -405,6 +405,7 @@ class WorkoutReview(ImmutableModel):
     plan_version_id: str
     planned_workout_id: str
     reconciliation_id: str | None = None
+    activity_id: str | None = None
     user_id: str
     athlete_id: str | None = None
     achievement_status: AchievementStatus
@@ -416,7 +417,11 @@ class WorkoutReview(ImmutableModel):
     ai_model: str | None = None
     prompt_version: str | None = None
     input_snapshot: dict = Field(default_factory=dict)
+    supersedes_review_id: str | None = None
+    operation_id: str = Field(default="legacy", min_length=1)
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+
+    _created_at_is_aware = field_validator("created_at")(_require_utc)
 
 
 class WorkoutExecutionState(ImmutableModel):
@@ -462,9 +467,13 @@ class NextWorkoutReadinessAssessment(ImmutableModel):
     status: ReadinessStatus
     safety_gate_result_id: str
     reason_codes: list[str] = Field(default_factory=list)
+    display_reason: str = Field(default="", max_length=500)
     referenced_review_ids: list[str] = Field(default_factory=list)
     supersedes_assessment_id: str | None = None
     rule_version: str = Field(min_length=1)
+    ai_model: str | None = None
+    prompt_version: str | None = None
+    operation_id: str = Field(default="legacy", min_length=1)
     input_snapshot_digest: str = Field(min_length=32, max_length=128)
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
@@ -917,11 +926,19 @@ class PlanningHistoryStore(Protocol):
         self, plan_version_id: str
     ) -> list[WorkoutReconciliation]: ...
     async def save_review(self, review: WorkoutReview) -> None: ...
+    async def get_review(self, review_id: str) -> WorkoutReview | None: ...
+    async def list_reconciliation_reviews(
+        self, reconciliation_id: str
+    ) -> list[WorkoutReview]: ...
+    async def list_plan_reviews(self, plan_version_id: str) -> list[WorkoutReview]: ...
     async def save_execution_state(self, state: WorkoutExecutionState) -> None: ...
     async def save_safety_gate(self, result: SafetyGateResult) -> None: ...
     async def save_readiness(
         self, assessment: NextWorkoutReadinessAssessment
     ) -> None: ...
+    async def list_readiness_assessments(
+        self, user_id: str, planned_workout_id: str
+    ) -> list[NextWorkoutReadinessAssessment]: ...
     async def save_lifecycle_event(self, event: TrainingPlanLifecycleEvent) -> None: ...
 
 
@@ -1018,6 +1035,31 @@ class InMemoryPlanningHistoryStore:
     async def save_review(self, review: WorkoutReview) -> None:
         _save_immutable(self.reviews, review.id, review)
 
+    async def get_review(self, review_id: str) -> WorkoutReview | None:
+        return self.reviews.get(review_id)
+
+    async def list_reconciliation_reviews(
+        self, reconciliation_id: str
+    ) -> list[WorkoutReview]:
+        return sorted(
+            [
+                item
+                for item in self.reviews.values()
+                if item.reconciliation_id == reconciliation_id
+            ],
+            key=lambda item: item.created_at,
+        )
+
+    async def list_plan_reviews(self, plan_version_id: str) -> list[WorkoutReview]:
+        return sorted(
+            [
+                item
+                for item in self.reviews.values()
+                if item.plan_version_id == plan_version_id
+            ],
+            key=lambda item: item.created_at,
+        )
+
     async def save_execution_state(self, state: WorkoutExecutionState) -> None:
         _save_immutable(self.execution_states, state.id, state)
 
@@ -1026,6 +1068,19 @@ class InMemoryPlanningHistoryStore:
 
     async def save_readiness(self, assessment: NextWorkoutReadinessAssessment) -> None:
         _save_immutable(self.readiness_assessments, assessment.id, assessment)
+
+    async def list_readiness_assessments(
+        self, user_id: str, planned_workout_id: str
+    ) -> list[NextWorkoutReadinessAssessment]:
+        return sorted(
+            [
+                item
+                for item in self.readiness_assessments.values()
+                if item.user_id == user_id
+                and item.planned_workout_id == planned_workout_id
+            ],
+            key=lambda item: item.revision,
+        )
 
     async def save_lifecycle_event(self, event: TrainingPlanLifecycleEvent) -> None:
         _save_immutable(self.lifecycle_events, event.id, event)
@@ -1238,6 +1293,38 @@ class BigQueryPlanningHistoryStore:
         row = review.model_dump(mode="json")
         await self._insert("workout_reviews", row, review.id)
 
+    async def get_review(self, review_id: str) -> WorkoutReview | None:
+        rows = await self._query_reviews("id", review_id, limit=1)
+        return rows[0] if rows else None
+
+    async def list_reconciliation_reviews(
+        self, reconciliation_id: str
+    ) -> list[WorkoutReview]:
+        return await self._query_reviews("reconciliation_id", reconciliation_id)
+
+    async def list_plan_reviews(self, plan_version_id: str) -> list[WorkoutReview]:
+        return await self._query_reviews("plan_version_id", plan_version_id)
+
+    async def _query_reviews(
+        self, field: str, value: str, limit: int | None = None
+    ) -> list[WorkoutReview]:
+        rows = await self._query_rows("workout_reviews", field, value, limit)
+        reviews = []
+        for row in rows:
+            values = dict(row.items())
+            values["operation_id"] = values.get("operation_id") or (
+                f"legacy:{values['id']}"
+            )
+            for name in (
+                "objective_factors",
+                "condition_factors",
+                "dialogue_factors",
+                "feedback_codes",
+            ):
+                values[name] = list(values.get(name) or [])
+            reviews.append(WorkoutReview.model_validate(values))
+        return reviews
+
     async def save_execution_state(self, state: WorkoutExecutionState) -> None:
         await self._insert(
             "workout_execution_states", state.model_dump(mode="json"), state.id
@@ -1251,6 +1338,60 @@ class BigQueryPlanningHistoryStore:
     async def save_readiness(self, assessment: NextWorkoutReadinessAssessment) -> None:
         await self._insert(
             "readiness_assessments", assessment.model_dump(mode="json"), assessment.id
+        )
+
+    async def list_readiness_assessments(
+        self, user_id: str, planned_workout_id: str
+    ) -> list[NextWorkoutReadinessAssessment]:
+        from google.cloud import bigquery
+
+        query = (
+            f"SELECT * FROM `{self._prefix}.readiness_assessments` "
+            "WHERE user_id = @user_id AND planned_workout_id = @workout_id "
+            "ORDER BY revision"
+        )
+        config = bigquery.QueryJobConfig(
+            query_parameters=[
+                bigquery.ScalarQueryParameter("user_id", "STRING", user_id),
+                bigquery.ScalarQueryParameter(
+                    "workout_id", "STRING", planned_workout_id
+                ),
+            ]
+        )
+        rows = await asyncio.to_thread(
+            lambda: list(self._client.query(query, job_config=config).result())
+        )
+        assessments = []
+        for row in rows:
+            values = dict(row.items())
+            values["reason_codes"] = list(values.get("reason_codes") or [])
+            values["referenced_review_ids"] = list(
+                values.get("referenced_review_ids") or []
+            )
+            values["operation_id"] = values.get("operation_id") or (
+                f"legacy:{values['id']}"
+            )
+            assessments.append(NextWorkoutReadinessAssessment.model_validate(values))
+        return assessments
+
+    async def _query_rows(
+        self, table: str, field: str, value: str, limit: int | None = None
+    ) -> list[Any]:
+        from google.cloud import bigquery
+
+        allowed = {"workout_reviews": {"id", "reconciliation_id", "plan_version_id"}}
+        if field not in allowed.get(table, set()):
+            raise ValueError("Unsupported planning history lookup")
+        query = (
+            f"SELECT * FROM `{self._prefix}.{table}` WHERE {field} = @value "
+            "ORDER BY created_at, id" + (" LIMIT @limit" if limit is not None else "")
+        )
+        parameters = [bigquery.ScalarQueryParameter("value", "STRING", value)]
+        if limit is not None:
+            parameters.append(bigquery.ScalarQueryParameter("limit", "INT64", limit))
+        config = bigquery.QueryJobConfig(query_parameters=parameters)
+        return await asyncio.to_thread(
+            lambda: list(self._client.query(query, job_config=config).result())
         )
 
     async def save_lifecycle_event(self, event: TrainingPlanLifecycleEvent) -> None:
@@ -1532,13 +1673,14 @@ def create_workout_review(
     workout: PlannedWorkout,
     rule_version: str,
     reconciliation_id: str | None = None,
+    operation_id: str = "automatic",
     **values,
 ) -> WorkoutReview:
     review_id = str(
         uuid.uuid5(
             uuid.NAMESPACE_URL,
             f"ai-coach:review:{workout.id}:"
-            f"{reconciliation_id or 'unmatched'}:{rule_version}",
+            f"{reconciliation_id or 'unmatched'}:{rule_version}:{operation_id}",
         )
     )
     return WorkoutReview(
@@ -1549,6 +1691,36 @@ def create_workout_review(
         user_id=workout.user_id,
         athlete_id=workout.athlete_id,
         rule_version=rule_version,
+        operation_id=operation_id,
+        **values,
+    )
+
+
+def create_readiness_assessment(
+    user_id: str,
+    local_date: date,
+    workout: PlannedWorkout,
+    revision: int,
+    status: ReadinessStatus,
+    safety_gate_result_id: str,
+    rule_version: str,
+    operation_id: str,
+    input_snapshot: dict[str, Any],
+    **values: Any,
+) -> NextWorkoutReadinessAssessment:
+    return NextWorkoutReadinessAssessment(
+        id=stable_planning_id(
+            "readiness", user_id, local_date, workout.id, revision, operation_id
+        ),
+        user_id=user_id,
+        local_date=local_date,
+        planned_workout_id=workout.id,
+        revision=revision,
+        status=status,
+        safety_gate_result_id=safety_gate_result_id,
+        rule_version=rule_version,
+        operation_id=operation_id,
+        input_snapshot_digest=planning_input_digest(input_snapshot),
         **values,
     )
 

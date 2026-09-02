@@ -1,7 +1,7 @@
 import asyncio
 import json
 import uuid
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from typing import Literal, Protocol
 
 from pydantic import BaseModel, Field
@@ -88,9 +88,33 @@ def build_coaching_input(
     route_comparison = coaching_context.get("current_route_comparison")
     if route_comparison is not None:
         route_comparison.pop("route_hash", None)
+    activity_snapshot = {
+        "id": activity.id,
+        "activity_type": activity.activity_type,
+        "started_at": activity.started_at.isoformat(),
+        "duration_seconds": activity.duration_seconds,
+        "distance_meters": activity.distance_meters,
+        "total_elevation_gain_meters": activity.total_elevation_gain_meters,
+        "average_heartrate_bpm": activity.average_heartrate_bpm,
+        "perceived_intensity": activity.perceived_intensity,
+        "completion_status": activity.completion_status,
+    }
+    condition_snapshot = {
+        "level": report.level.value,
+        "severity_bucket": (
+            "high"
+            if report.severity is not None and report.severity >= 7
+            else "moderate"
+            if report.severity is not None and report.severity >= 4
+            else "low"
+            if report.severity is not None
+            else None
+        ),
+        "worsened_during_activity": report.worsened_during_activity,
+    }
     return {
-        "activity": activity.model_dump(mode="json"),
-        "condition": report.model_dump(mode="json"),
+        "activity": activity_snapshot,
+        "condition": condition_snapshot,
         "coaching_context": coaching_context,
         "mandatory_constraints": constraints or hard_safety_constraints(report),
         "task": "Propose one conservative workout for the next day in Japanese.",
@@ -143,16 +167,34 @@ class CoachingService:
         report: ConditionReport,
         line_user_id: str,
         context: CoachingContext | None = None,
+        *,
+        plan_version_id: str | None = None,
+        planned_workout_id: str | None = None,
+        review_id: str | None = None,
+        target_date: date | None = None,
+        force_rest: bool = False,
     ) -> WorkoutProposal:
         context = context or CoachingContext()
-        generated = enforce_safety(
-            await self._generator.generate(activity, report, context), report
-        )
+        if force_rest or report.level == ConditionLevel.PAIN:
+            generated = CoachOutput(
+                title="休養",
+                rationale="週間計画の休養日または安全判定を優先します。",
+                duration_minutes=0,
+                intensity="rest",
+                safety_notes=hard_safety_constraints(report)[:5],
+            )
+        else:
+            generated = enforce_safety(
+                await self._generator.generate(activity, report, context), report
+            )
         proposal = WorkoutProposal(
             id=str(uuid.uuid4()),
             athlete_id=activity.athlete_id,
             source_activity_id=activity.id,
-            target_date=activity.started_at.date() + timedelta(days=1),
+            plan_version_id=plan_version_id,
+            planned_workout_id=planned_workout_id,
+            review_id=review_id,
+            target_date=target_date or activity.started_at.date() + timedelta(days=1),
             **generated.model_dump(),
         )
         await self._proposals.save(proposal, line_user_id)

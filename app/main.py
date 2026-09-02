@@ -33,7 +33,7 @@ from app.oauth import InvalidOAuthState, OAuthStateSigner, strava_authorization_
 from app.oauth_service import StravaOAuthService, UnknownOAuthSession
 from app.plan_approval import PlanApprovalError, PlanApprovalService
 from app.plan_generation import WeeklyPlanGenerationService
-from app.planning import ReconciliationStatus, TrainingSettingsService
+from app.planning import ReadinessStatus, ReconciliationStatus, TrainingSettingsService
 from app.profile import (
     ACTIVITY_PLACES,
     ENVIRONMENT_ALIASES,
@@ -45,6 +45,7 @@ from app.profile import (
     ProfileWorkflow,
     profile_settings_item_id,
 )
+from app.readiness import WorkoutFeedbackService
 from app.reconciliation import ReconciliationError, WorkoutReconciliationService
 from app.runtime import build_runtime
 from app.security import (
@@ -175,6 +176,15 @@ class MissingWorkoutScanTask(BaseModel):
     line_user_id: str = Field(min_length=1, max_length=128)
     local_date: date
     provider_sync_confirmed: bool = False
+    operation_id: str = Field(
+        min_length=1, max_length=128, pattern=r"^[A-Za-z0-9_.:-]+$"
+    )
+
+
+class ReadinessEvaluationTask(BaseModel):
+    user_id: str = Field(min_length=1, max_length=128)
+    line_user_id: str = Field(min_length=1, max_length=128)
+    activity_id: str = Field(min_length=1, max_length=128)
     operation_id: str = Field(
         min_length=1, max_length=128, pattern=r"^[A-Za-z0-9_.:-]+$"
     )
@@ -926,6 +936,62 @@ async def reconcile_missing_workouts_task(
     return {"status": "completed", "candidate_count": len(candidates)}
 
 
+@app.post("/tasks/plans/evaluate-readiness", status_code=202)
+async def evaluate_readiness_task(
+    request: Request, task: ReadinessEvaluationTask
+) -> dict[str, object]:
+    await verify_cloud_task_request(request, get_settings())
+    if task.user_id != task.line_user_id:
+        raise HTTPException(status_code=403, detail="Task owner mismatch")
+    event_key = f"{task.activity_id}:{task.operation_id}"
+    if not await runtime.events.reserve("readiness_evaluation", event_key):
+        return {"status": "duplicate"}
+    try:
+        activity = await runtime.activities.get(task.activity_id)
+        context = await runtime.activity_contexts.get(task.activity_id)
+        if (
+            activity is None
+            or context is None
+            or context.line_user_id != task.line_user_id
+        ):
+            raise HTTPException(status_code=404, detail="Activity context not found")
+        if activity.user_id is not None and activity.user_id != task.user_id:
+            raise HTTPException(status_code=403, detail="Activity owner mismatch")
+        if activity.user_id is None:
+            activity = activity.model_copy(update={"user_id": task.user_id})
+        reports = await runtime.condition_reports.list_recent(
+            context.athlete_id, limit=20
+        )
+        condition = next(
+            (item for item in reports if item.activity_id == task.activity_id), None
+        )
+        result = await WorkoutFeedbackService(
+            runtime.planning_history,
+            runtime.active_plan_pointers,
+            runtime.training_settings_state,
+            runtime.active_readiness_pointers,
+            runtime.readiness_generator,
+        ).evaluate(activity, condition, task.operation_id)
+        if (
+            condition is None
+            and result.assessment is not None
+            and result.assessment.status == ReadinessStatus.NEEDS_INFORMATION
+        ):
+            await runtime.condition_prompts.send(task.line_user_id, activity)
+    except Exception:
+        await runtime.events.release("readiness_evaluation", event_key)
+        raise
+    await runtime.events.complete("readiness_evaluation", event_key)
+    return {
+        "status": "completed",
+        "review_id": result.review.id if result.review else None,
+        "assessment_id": result.assessment.id if result.assessment else None,
+        "readiness_status": (
+            result.assessment.status.value if result.assessment else None
+        ),
+    }
+
+
 @app.get("/oauth/strava/start")
 async def start_strava_oauth(line_user_id: str) -> RedirectResponse:
     return RedirectResponse(await create_strava_authorization_url(line_user_id))
@@ -997,27 +1063,65 @@ async def create_coaching_proposal(report) -> None:
             "このアクティビティの提案はすでに作成済みです。",
         )
         return
-    service = CoachingService(runtime.coach, runtime.proposals, runtime.proposal_sender)
-    coaching_context = CoachingContext(
-        goals=await runtime.goals.list(context.line_user_id),
-        training_resources=await runtime.training_resources.list(context.line_user_id),
-        recent_activities=await runtime.activities.list_recent(
-            context.athlete_id, limit=10
-        ),
-        recent_conditions=await runtime.condition_reports.list_recent(
-            context.athlete_id, limit=10
-        ),
-        current_activity_metrics=await runtime.activity_metrics.get(report.activity_id),
-        high_load_segments=await runtime.activity_segments.list_high_load(
-            report.activity_id, limit=5
-        ),
-        current_route_comparison=await runtime.route_comparisons.get(
-            report.activity_id
-        ),
-    )
     try:
+        service = CoachingService(
+            runtime.coach, runtime.proposals, runtime.proposal_sender
+        )
+        feedback = await WorkoutFeedbackService(
+            runtime.planning_history,
+            runtime.active_plan_pointers,
+            runtime.training_settings_state,
+            runtime.active_readiness_pointers,
+            runtime.readiness_generator,
+        ).evaluate(activity, report)
+        coaching_context = CoachingContext(
+            goals=await runtime.goals.list(context.line_user_id),
+            training_resources=await runtime.training_resources.list(
+                context.line_user_id
+            ),
+            recent_activities=await runtime.activities.list_recent(
+                context.athlete_id, limit=10
+            ),
+            recent_conditions=await runtime.condition_reports.list_recent(
+                context.athlete_id, limit=10
+            ),
+            current_activity_metrics=await runtime.activity_metrics.get(
+                report.activity_id
+            ),
+            high_load_segments=await runtime.activity_segments.list_high_load(
+                report.activity_id, limit=5
+            ),
+            current_route_comparison=await runtime.route_comparisons.get(
+                report.activity_id
+            ),
+        )
         await service.create_proposal(
-            activity, report, context.line_user_id, coaching_context
+            activity,
+            report,
+            context.line_user_id,
+            coaching_context,
+            plan_version_id=(
+                feedback.next_workout.plan_version_id
+                if feedback.next_workout is not None
+                else None
+            ),
+            planned_workout_id=(
+                feedback.next_workout.id if feedback.next_workout is not None else None
+            ),
+            review_id=feedback.review.id if feedback.review is not None else None,
+            target_date=(
+                feedback.next_workout.scheduled_date
+                if feedback.next_workout is not None
+                else None
+            ),
+            force_rest=(
+                feedback.next_workout is not None
+                and (
+                    feedback.next_workout.workout_type.lower() == "rest"
+                    or feedback.assessment is not None
+                    and feedback.assessment.status == ReadinessStatus.BLOCKED
+                )
+            ),
         )
     except Exception:
         await runtime.events.release("proposal", report.activity_id)

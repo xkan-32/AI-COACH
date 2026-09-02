@@ -115,6 +115,14 @@ from app.publication import (
     PublicationApprovalStateStore,
     PublicationHistoryStore,
 )
+from app.readiness import (
+    ActiveReadinessPointerStore,
+    FirestoreActiveReadinessPointerStore,
+    InMemoryActiveReadinessPointerStore,
+    LocalReadinessGenerator,
+    ReadinessGenerator,
+    VertexReadinessGenerator,
+)
 from app.segment_analysis import RouteFingerprintHasher
 from app.state import (
     EventStore,
@@ -201,9 +209,11 @@ class Runtime:
     settings_links: SettingsLinkStore
     planning_history: PlanningHistoryStore
     active_plan_pointers: ActivePlanPointerStore
+    active_readiness_pointers: ActiveReadinessPointerStore
     training_settings_state: TrainingSettingsStateStore
     training_settings_history: TrainingSettingsHistoryStore
     weekly_plan_generator: WeeklyPlanGenerator
+    readiness_generator: ReadinessGenerator
     plan_approval_states: PlanApprovalStateStore
     plan_action_signer: PlanActionSigner
     weekly_plan_links: WeeklyPlanLinkStore
@@ -222,6 +232,7 @@ def build_runtime(settings: Settings) -> Runtime:
         training_settings = InMemoryTrainingSettingsStore()
         planning_history = InMemoryPlanningHistoryStore()
         active_plan_pointers = InMemoryActivePlanPointerStore()
+        active_readiness_pointers = InMemoryActiveReadinessPointerStore()
         return Runtime(
             events=InMemoryEventStore(),
             oauth_sessions=InMemoryOAuthSessionStore(),
@@ -262,9 +273,11 @@ def build_runtime(settings: Settings) -> Runtime:
             settings_links=InMemorySettingsLinkStore(),
             planning_history=planning_history,
             active_plan_pointers=active_plan_pointers,
+            active_readiness_pointers=active_readiness_pointers,
             training_settings_state=training_settings,
             training_settings_history=training_settings,
             weekly_plan_generator=LocalWeeklyPlanGenerator(),
+            readiness_generator=LocalReadinessGenerator(),
             plan_approval_states=InMemoryPlanApprovalStateStore(),
             plan_action_signer=PlanActionSigner(settings.oauth_state_signing_key),
             weekly_plan_links=InMemoryWeeklyPlanLinkStore(),
@@ -308,6 +321,7 @@ def build_runtime(settings: Settings) -> Runtime:
     )
     planning_history = BigQueryPlanningHistoryStore(bigquery_client, table_prefix)
     active_plan_pointers = FirestoreActivePlanPointerStore(firestore_client)
+    active_readiness_pointers = FirestoreActiveReadinessPointerStore(firestore_client)
     return Runtime(
         events=FirestoreEventStore(firestore_client),
         oauth_sessions=FirestoreOAuthSessionStore(firestore_client),
@@ -381,11 +395,15 @@ def build_runtime(settings: Settings) -> Runtime:
         settings_links=FirestoreSettingsLinkStore(firestore_client),
         planning_history=planning_history,
         active_plan_pointers=active_plan_pointers,
+        active_readiness_pointers=active_readiness_pointers,
         training_settings_state=FirestoreTrainingSettingsStateStore(firestore_client),
         training_settings_history=BigQueryTrainingSettingsHistoryStore(
             bigquery_client, table_prefix
         ),
         weekly_plan_generator=VertexWeeklyPlanGenerator(
+            genai_client, settings.vertex_model
+        ),
+        readiness_generator=VertexReadinessGenerator(
             genai_client, settings.vertex_model
         ),
         plan_approval_states=FirestorePlanApprovalStateStore(firestore_client),

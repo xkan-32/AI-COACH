@@ -501,6 +501,8 @@ AI実行前に制約を作り、AI出力後にも同じ制約で検証する。�
 
 ### PL-01E Workout ReviewとReadiness
 
+実装済み。Activity単位Review、決定論的Safety Gate、次予定単位のrevision付きReadiness、既存提案への計画参照接続は`docs/next-session-pl-01e.md`を参照する。
+
 - Activity単位Reviewと次の予定メニュー単位Readinessを分ける。
 - 同日複数Activity、体調未回答、安全block、追加質問を扱う。
 - 既存の単発翌日提案をこの経路へ段階的に接続する。
