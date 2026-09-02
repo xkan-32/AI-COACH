@@ -19,9 +19,7 @@ from app.web_settings import (
 
 
 @pytest.mark.asyncio
-async def test_firestore_settings_link_awaits_transaction_get_before_iteration() -> (
-    None
-):
+async def test_firestore_settings_link_reads_through_client_transaction() -> None:
     now = datetime(2026, 9, 2, tzinfo=UTC)
 
     class Snapshot:
@@ -38,12 +36,6 @@ async def test_firestore_settings_link_awaits_transaction_get_before_iteration()
         def __init__(self) -> None:
             self.updated = False
             self.committed = False
-
-        async def get(self, document):
-            async def stream():
-                yield Snapshot()
-
-            return stream()
 
         def update(self, document, values) -> None:
             self.updated = values["used_at"] == now
@@ -67,6 +59,12 @@ async def test_firestore_settings_link_awaits_transaction_get_before_iteration()
         def transaction(self):
             return transaction
 
+        async def get_all(self, documents, transaction):
+            assert len(documents) == 1
+            assert transaction is transaction_instance
+            yield Snapshot()
+
+    transaction_instance = transaction
     store = FirestoreSettingsLinkStore(Client())
     assert await store.consume("nonce", now) == "U-firestore"
     assert transaction.updated
