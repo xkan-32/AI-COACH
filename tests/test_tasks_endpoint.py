@@ -1,8 +1,28 @@
+import pytest
 from fastapi.testclient import TestClient
 
-from app.main import app
+from app.line_menu import MENU_MESSAGES
+from app.main import app, runtime
 
 client = TestClient(app)
+
+
+@pytest.mark.parametrize("target", sorted(MENU_MESSAGES))
+def test_line_event_worker_routes_every_rich_menu_action(target: str) -> None:
+    runtime.messenger.texts.clear()
+    response = client.post(
+        "/tasks/line/events",
+        json={
+            "event_key": f"menu-{target}",
+            "event": {
+                "type": "postback",
+                "source": {"userId": "U-menu"},
+                "postback": {"data": f"action=menu&version=1&target={target}"},
+            },
+        },
+    )
+    assert response.status_code == 200
+    assert runtime.messenger.texts == [("U-menu", MENU_MESSAGES[target])]
 
 
 def test_activity_task_endpoint_rejects_unlinked_athlete() -> None:

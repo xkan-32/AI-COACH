@@ -18,8 +18,8 @@ jobs:
           python-version: "3.12"
           cache: pip
       - run: pip install -e '.[dev,gcp]'
-      - run: ruff check app tests
-      - run: ruff format --check app tests
+      - run: ruff check app tests scripts
+      - run: ruff format --check app tests scripts
       - run: pytest -q
 
   terraform-validate:

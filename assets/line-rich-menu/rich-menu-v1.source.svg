@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2500" height="1686" viewBox="0 0 2500 1686">
+  <rect width="2500" height="1686" fill="#F5F8F7"/>
+  <g font-family="'Noto Sans JP','Yu Gothic',sans-serif" text-anchor="middle">
+    <g fill="#E4F3EE"><rect x="0" y="0" width="833" height="843"/><rect x="1666" y="0" width="834" height="843"/><rect x="833" y="843" width="833" height="843"/></g>
+    <g fill="#FFFFFF"><rect x="833" y="0" width="833" height="843"/><rect x="0" y="843" width="833" height="843"/><rect x="1666" y="843" width="834" height="843"/></g>
+    <g fill="none" stroke="#176B5B" stroke-width="34" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M310 380l105-105 105 105 105-160 105 160"/><path d="M415 500h210"/>
+      <path d="M1120 270c90-85 180 40 130 115-45 65-125 125-125 125s-80-60-125-125c-50-75 40-200 120-115z"/><path d="M1300 260v250M1210 385h180"/>
+      <path d="M1885 385h390M1990 280v210M2170 280v210"/><path d="M1940 535h280"/>
+      <circle cx="416" cy="1120" r="155"/><path d="M416 1030v105l85 60"/>
+      <path d="M1040 1250l135-150 120 90 165-210"/><path d="M1385 980h75v75"/>
+      <circle cx="2083" cy="1120" r="155"/><path d="M2083 930v80M2083 1230v80M1893 1120h80M2193 1120h80"/>
+    </g>
+    <g fill="#173F38" font-size="74" font-weight="700">
+      <text x="416" y="680">今日の提案</text><text x="1249" y="680">体調を記録</text><text x="2083" y="680">運動を記録</text>
+      <text x="416" y="1515">目標</text><text x="1249" y="1515">記録・進捗</text><text x="2083" y="1515">設定</text>
+    </g>
+  </g>
+  <path d="M833 0v1686M1666 0v1686M0 843h2500" stroke="#C8D8D4" stroke-width="4"/>
+</svg>

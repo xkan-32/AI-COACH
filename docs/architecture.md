@@ -17,9 +17,14 @@ LINE webhook -> Cloud Run API -> Cloud Tasks -> coaching worker
 LINE approval -> Cloud Run API -> Cloud Tasks -> approval worker
                                          |-> approval record
                                          `-> Strava Description update
+
+LINE rich menu -> LINE webhook -> Cloud Tasks -> LINE event worker
+                                              `-> menu action router -> guidance
 ```
 
 Webhook handlers authenticate, normalize, enqueue, and acknowledge. Workers own external calls and retries. The initial code keeps orchestration in one deployable service; it can be split without changing domain models.
+
+リッチメニューは既存機能への入口であり、Strava更新権限を持たない。`action=menu`はLINE event worker内のrouterで案内へ変換し、署名・期限付きの`action=proposal`だけが承認workerを起動できる。
 
 ## Data model
 

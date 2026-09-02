@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "image": "../../assets/line-rich-menu/rich-menu-v1.png",
+  "richMenu": {
+    "size": {"width": 2500, "height": 1686},
+    "selected": true,
+    "name": "replaced-by-content-hash-during-sync",
+    "chatBarText": "AIコーチ メニュー",
+    "areas": [
+      {"bounds": {"x": 0, "y": 0, "width": 833, "height": 843}, "action": {"type": "postback", "label": "今日の提案", "data": "action=menu&version=1&target=today_proposal", "displayText": "今日の提案"}},
+      {"bounds": {"x": 833, "y": 0, "width": 833, "height": 843}, "action": {"type": "postback", "label": "体調を記録", "data": "action=menu&version=1&target=condition", "displayText": "体調を記録"}},
+      {"bounds": {"x": 1666, "y": 0, "width": 834, "height": 843}, "action": {"type": "postback", "label": "運動を記録", "data": "action=menu&version=1&target=manual_activity", "displayText": "運動を記録"}},
+      {"bounds": {"x": 0, "y": 843, "width": 833, "height": 843}, "action": {"type": "postback", "label": "目標", "data": "action=menu&version=1&target=goals", "displayText": "目標"}},
+      {"bounds": {"x": 833, "y": 843, "width": 833, "height": 843}, "action": {"type": "postback", "label": "記録・進捗", "data": "action=menu&version=1&target=progress", "displayText": "記録・進捗"}},
+      {"bounds": {"x": 1666, "y": 843, "width": 834, "height": 843}, "action": {"type": "postback", "label": "設定", "data": "action=menu&version=1&target=settings", "displayText": "設定"}}
+    ]
+  }
+}
