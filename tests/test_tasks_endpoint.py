@@ -1,8 +1,11 @@
+import logging
+
 import pytest
 from fastapi.testclient import TestClient
 
 from app.line_menu import MENU_MESSAGES
 from app.main import app, runtime
+from app.strava import StravaApiError
 
 client = TestClient(app)
 
@@ -66,6 +69,36 @@ def test_activity_task_endpoint_rejects_non_create_event() -> None:
         },
     )
     assert response.status_code == 422
+
+
+def test_activity_task_logs_safe_strava_error_metadata(monkeypatch, caplog) -> None:
+    async def fail_ingestion(self, activity_id, athlete_id):
+        raise StravaApiError(
+            "Strava activity fetch failed",
+            status_code=404,
+            error_kind="http_status",
+        )
+
+    monkeypatch.setattr("app.main.ActivityIngestionService.ingest", fail_ingestion)
+    with caplog.at_level(logging.WARNING, logger="app.main"):
+        response = client.post(
+            "/tasks/activities/ingest",
+            json={
+                "object_type": "activity",
+                "object_id": 10,
+                "aspect_type": "create",
+                "owner_id": 20,
+                "subscription_id": 30,
+                "event_time": 1_700_000_000,
+            },
+        )
+
+    assert response.status_code == 502
+    assert "activity_id=10" in caplog.text
+    assert "athlete_id=20" in caplog.text
+    assert "error_kind=http_status" in caplog.text
+    assert "strava_status_code=404" in caplog.text
+    assert "access_token" not in caplog.text
 
 
 def test_proposal_decision_sends_completion_message(monkeypatch) -> None:
