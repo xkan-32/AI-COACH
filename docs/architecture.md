@@ -61,3 +61,4 @@ The model chooses within a bounded envelope. A deterministic policy can force re
 - 未定義の運動環境は`other`と詳細へそのまま保持し、推測で既知区分へ分類しない。健康情報や入力本文をapplication logへ出さない。
 - リッチメニューの`goals`と`settings`は既存LINE worker内でPF-01 workflowを開始する。Webhookの署名検証、event予約、Cloud Tasks enqueue、即時200応答は変更しない。
 - PF-01の通常操作は`action=profile` postbackとQuick Replyを利用する。postbackには操作種別、安定ID、既知選択値だけを含め、自由記述や健康情報は含めない。テキストコマンドは後方互換経路として残す。
+- 運動環境の複数選択中は`profile_drafts.values.selected`へJSON配列として途中保存する。完了時はdraft operation IDと正規化keyから決定的なdocument IDを生成し、Task再送時も同じ項目を重複作成しない。
