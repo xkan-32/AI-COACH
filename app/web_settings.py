@@ -67,8 +67,12 @@ class FirestoreSettingsLinkStore:
     async def consume(self, nonce: str, now: datetime) -> str | None:
         document = self._client.collection("profile_settings_links").document(nonce)
         transaction = self._client.transaction()
-        snapshot_stream = await transaction.get(document)
-        snapshots = [snapshot async for snapshot in snapshot_stream]
+        snapshots = [
+            snapshot
+            async for snapshot in self._client.get_all(
+                [document], transaction=transaction
+            )
+        ]
         snapshot = snapshots[0] if snapshots else None
         if snapshot is None or not snapshot.exists:
             return None
