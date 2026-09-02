@@ -27,7 +27,7 @@ LINEリッチメニューの「設定」から、目標・プロフィール・�
 
 ## 実装箇所
 
-- `app/profile.py`: 目標・運動環境model、Firestore store、会話workflow、正規化、冪等保存
+- `app/profile.py`: 目標・運動環境model、Firestore store、会話workflow、正規化、Web設定のtransaction・revision・冪等保存
 - `app/web_settings.py`: 署名付きワンタイムリンク、30分session、所有者・期限検証
 - `app/static/profile-settings.html`: モバイル対応の一覧・編集画面
 - `app/main.py`: LINE worker routing、設定ページ/API、AI context連携
@@ -39,7 +39,7 @@ LINEリッチメニューの「設定」から、目標・プロフィール・�
 1. リッチメニューの「目標」は有効目標を読み取り専用で表示する。
 2. 「設定」は10分間有効なワンタイムURLをLINEへ送る。
 3. URLを30分間有効なHttpOnly・Secure・SameSite=Strict cookieへ交換する。
-4. 設定APIはcookie、Origin、document所有者を検証してから保存する。
+4. 設定APIはcookie、Origin、document所有者、revisionを検証し、目標と運動環境を同一Firestore transactionで保存する。同一operation IDの再送では重複保存しない。
 5. 目標・運動環境は次回のAI提案contextへ反映する。
 6. 旧会話UIとテキストコマンドは後方互換経路として残す。
 

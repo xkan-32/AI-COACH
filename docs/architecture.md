@@ -112,9 +112,10 @@ The model chooses within a bounded envelope. A deterministic policy can force re
 - `training_environments/{environment_id}` は安定ID、所有者、表示名、`activity_place/equipment/other`、`active/inactive`、任意詳細を保持する。旧`training_resources/{line_user_id}.resources`は構造化documentがない場合だけ読み取る。
 - `profile_drafts/{line_user_id}` は操作ID、action、step、途中値、`expires_at`を保持する。`expires_at`はFirestore TTL対象で、アプリ側でも期限を検証する。
 - `profile_settings_links/{nonce}` はLINEユーザーに紐づく10分間有効な設定リンクを保持する。nonceは署名され、Firestore transactionで一度だけ消費し、`expires_at`をTTL対象にする。URLへLINEユーザーIDは含めない。
+- `profile_settings_state/{line_user_id}` はWeb設定のrevisionと最後に完了したoperation ID・payload digestを保持する。目標・運動環境・stateを単一Firestore transactionで更新し、同時編集はrevision不一致として拒否する。同一operation・同一payloadの再送だけを完了済みとして扱い、operation IDを流用した異なるpayloadは拒否する。
 - 会話の最終保存IDにはdraftの操作IDを使う。同じCloud Taskが保存後に再送されても同じdocumentを上書きするため、追加が重複しない。
 - 未定義の運動環境は`other`と詳細へそのまま保持し、推測で既知区分へ分類しない。健康情報や入力本文をapplication logへ出さない。
 - リッチメニューの`goals`は有効目標の一覧表示だけを行う。`settings`は既存LINE workerで署名・期限付きワンタイムURLを発行し、同じCloud Run上の設定ページへのURIボタンを送る。LIFF／LINE Loginチャネルは不要である。Webhookの署名検証、event予約、Cloud Tasks enqueue、即時200応答は変更しない。
-- 設定ページはワンタイムURLをHttpOnly・Secure・SameSite=Strictの30分セッションcookieへ交換する。保存APIはcookieとOriginを検証し、既存IDの所有者を確認してから目標・運動環境を更新する。
+- 設定ページはワンタイムURLをHttpOnly・Secure・SameSite=Strictの30分セッションcookieへ交換する。保存APIはcookieとOriginを検証し、既存IDの所有者とrevisionを確認してから目標・運動環境を原子的に更新する。新規IDはoperation IDから決定的に生成する。
 - 旧`action=profile`会話とテキストコマンドは後方互換経路として残す。通常の編集導線は設定Webページとし、自由記述や健康情報をapplication logへ出さない。
 - 運動環境の複数選択中は`profile_drafts.values.selected`へJSON配列として途中保存する。完了時はdraft operation IDと正規化keyから決定的なdocument IDを生成し、Task再送時も同じ項目を重複作成しない。

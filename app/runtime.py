@@ -71,12 +71,15 @@ from app.planning import (
 from app.profile import (
     FirestoreGoalStore,
     FirestoreProfileDraftStore,
+    FirestoreProfileSettingsStore,
     FirestoreTrainingResourceStore,
     GoalStore,
     InMemoryGoalStore,
     InMemoryProfileDraftStore,
+    InMemoryProfileSettingsStore,
     InMemoryTrainingResourceStore,
     ProfileDraftStore,
+    ProfileSettingsStore,
     TrainingResourceStore,
 )
 from app.publication import (
@@ -149,6 +152,7 @@ class Runtime:
     goals: GoalStore
     training_resources: TrainingResourceStore
     profile_drafts: ProfileDraftStore
+    profile_settings: ProfileSettingsStore
     settings_links: SettingsLinkStore
     planning_history: PlanningHistoryStore
     active_plan_pointers: ActivePlanPointerStore
@@ -162,6 +166,8 @@ def build_runtime(settings: Settings) -> Runtime:
         line = InMemoryConditionPromptSender()
         analytics = InMemoryProposalStore()
         proposal_states = InMemoryProposalStateStore()
+        goals = InMemoryGoalStore()
+        training_resources = InMemoryTrainingResourceStore()
         return Runtime(
             events=InMemoryEventStore(),
             oauth_sessions=InMemoryOAuthSessionStore(),
@@ -190,9 +196,10 @@ def build_runtime(settings: Settings) -> Runtime:
             proposal_states=proposal_states,
             proposal_analytics=analytics,
             proposal_tasks=InMemoryProposalDecisionPublisher(),
-            goals=InMemoryGoalStore(),
-            training_resources=InMemoryTrainingResourceStore(),
+            goals=goals,
+            training_resources=training_resources,
             profile_drafts=InMemoryProfileDraftStore(),
+            profile_settings=InMemoryProfileSettingsStore(goals, training_resources),
             settings_links=InMemorySettingsLinkStore(),
             planning_history=InMemoryPlanningHistoryStore(),
             active_plan_pointers=InMemoryActivePlanPointerStore(),
@@ -294,6 +301,7 @@ def build_runtime(settings: Settings) -> Runtime:
         goals=FirestoreGoalStore(firestore_client),
         training_resources=FirestoreTrainingResourceStore(firestore_client),
         profile_drafts=FirestoreProfileDraftStore(firestore_client),
+        profile_settings=FirestoreProfileSettingsStore(firestore_client),
         settings_links=FirestoreSettingsLinkStore(firestore_client),
         planning_history=BigQueryPlanningHistoryStore(bigquery_client, table_prefix),
         active_plan_pointers=FirestoreActivePlanPointerStore(firestore_client),
