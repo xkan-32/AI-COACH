@@ -494,6 +494,8 @@ AI実行前に制約を作り、AI出力後にも同じ制約で検証する。�
 
 ### PL-01D 実績照合
 
+実装済み。共通matcher、候補・確定履歴、LINE訂正、未実施確認、split・重複制御は`docs/next-session-pl-01d.md`を参照する。
+
 - Stravaと手動Activityを共通matcherへ接続する。
 - split、計画外、曖昧候補、遅延同期、未実施確認、手動訂正を実装する。
 

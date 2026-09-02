@@ -1,4 +1,5 @@
 import logging
+from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
@@ -245,6 +246,76 @@ def test_line_event_worker_keeps_condition_severity_ahead_of_weight() -> None:
     assert response.status_code == 200
     assert runtime.weight_logs.logs == {}
     assert "悪化しましたか" in runtime.messenger.texts[-1][1]
+
+
+def test_missing_workout_scan_prompts_and_is_idempotent(monkeypatch) -> None:
+    class FakeReconciliationService:
+        async def missing_candidates(self, *args, **kwargs):
+            return [SimpleNamespace(id="reconciliation-missing-1")]
+
+    monkeypatch.setattr(
+        "app.main._reconciliation_service", lambda: FakeReconciliationService()
+    )
+    runtime.messenger.quick_replies.clear()
+    payload = {
+        "user_id": "U-missing",
+        "line_user_id": "U-missing",
+        "local_date": "2026-09-08",
+        "provider_sync_confirmed": True,
+        "operation_id": "missing-scan-endpoint-1",
+    }
+
+    response = client.post("/tasks/plans/reconcile-missing", json=payload)
+    duplicate = client.post("/tasks/plans/reconcile-missing", json=payload)
+
+    assert response.status_code == 202
+    assert response.json()["candidate_count"] == 1
+    assert duplicate.json() == {"status": "duplicate"}
+    prompt = runtime.messenger.quick_replies[-1]
+    assert prompt[0] == "U-missing"
+    assert dict(prompt[2]).keys() == {"未実施", "同期待ち", "予定変更"}
+
+
+def test_missing_workout_postback_records_user_decision(monkeypatch) -> None:
+    decisions = []
+
+    class FakeReconciliationService:
+        async def resolve_missing(self, **values):
+            decisions.append(values)
+
+    monkeypatch.setattr(
+        "app.main._reconciliation_service", lambda: FakeReconciliationService()
+    )
+    runtime.messenger.texts.clear()
+    response = client.post(
+        "/tasks/line/events",
+        json={
+            "event_key": "missing-decision-endpoint-1",
+            "event": {
+                "type": "postback",
+                "source": {"userId": "U-missing"},
+                "postback": {
+                    "data": (
+                        "action=reconciliation_missing&reconciliation_id="
+                        "reconciliation-missing-1&decision=schedule_changed"
+                    )
+                },
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    assert decisions == [
+        {
+            "user_id": "U-missing",
+            "expected_reconciliation_id": "reconciliation-missing-1",
+            "decision": "schedule_changed",
+        }
+    ]
+    assert runtime.messenger.texts[-1] == (
+        "U-missing",
+        "予定変更として記録しました。",
+    )
 
 
 def test_line_event_worker_starts_weight_from_condition_menu() -> None:

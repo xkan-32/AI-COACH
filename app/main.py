@@ -33,7 +33,7 @@ from app.oauth import InvalidOAuthState, OAuthStateSigner, strava_authorization_
 from app.oauth_service import StravaOAuthService, UnknownOAuthSession
 from app.plan_approval import PlanApprovalError, PlanApprovalService
 from app.plan_generation import WeeklyPlanGenerationService
-from app.planning import TrainingSettingsService
+from app.planning import ReconciliationStatus, TrainingSettingsService
 from app.profile import (
     ACTIVITY_PLACES,
     ENVIRONMENT_ALIASES,
@@ -45,6 +45,7 @@ from app.profile import (
     ProfileWorkflow,
     profile_settings_item_id,
 )
+from app.reconciliation import ReconciliationError, WorkoutReconciliationService
 from app.runtime import build_runtime
 from app.security import (
     ApprovalActionError,
@@ -169,6 +170,16 @@ class WeeklyPlanDecisionInput(BaseModel):
     action_token: str = Field(min_length=1, max_length=2048)
 
 
+class MissingWorkoutScanTask(BaseModel):
+    user_id: str = Field(min_length=1, max_length=128)
+    line_user_id: str = Field(min_length=1, max_length=128)
+    local_date: date
+    provider_sync_confirmed: bool = False
+    operation_id: str = Field(
+        min_length=1, max_length=128, pattern=r"^[A-Za-z0-9_.:-]+$"
+    )
+
+
 def _settings_signer() -> SettingsTokenSigner:
     return SettingsTokenSigner(get_settings().oauth_state_signing_key)
 
@@ -279,6 +290,7 @@ def _manual_activity_workflow() -> ManualActivityWorkflow:
         ),
         publications=runtime.manual_strava_publications,
         ingestion_state=runtime.activity_ingestion_state,
+        on_saved=_reconcile_activity,
         on_completed=_send_manual_activity_condition_prompt,
     )
 
@@ -299,6 +311,119 @@ def _weight_workflow() -> WeightWorkflow:
 
 async def _send_manual_activity_condition_prompt(activity, line_user_id: str) -> None:
     await runtime.condition_prompts.send(line_user_id, activity)
+
+
+def _reconciliation_service() -> WorkoutReconciliationService:
+    return WorkoutReconciliationService(
+        runtime.planning_history,
+        runtime.active_plan_pointers,
+        runtime.training_settings_state,
+    )
+
+
+async def _reconcile_activity(activity, line_user_id: str) -> None:
+    if await runtime.activity_ingestion_state.is_completed(
+        activity.id, "reconciliation"
+    ):
+        return
+    result = await _reconciliation_service().reconcile(activity)
+    reconciliation = result.reconciliation
+    if result.candidates:
+        choices = [
+            (
+                _workout_choice_label(item),
+                (
+                    f"action=reconciliation&activity_id={activity.id}"
+                    f"&reconciliation_id={reconciliation.id}"
+                    f"&planned_workout_id={item.id}"
+                ),
+            )
+            for item in result.candidates[:3]
+        ]
+        choices.append(
+            (
+                "計画外",
+                (
+                    f"action=reconciliation&activity_id={activity.id}"
+                    f"&reconciliation_id={reconciliation.id}"
+                    "&planned_workout_id=unplanned"
+                ),
+            )
+        )
+        if reconciliation.status in {
+            ReconciliationStatus.AMBIGUOUS,
+            ReconciliationStatus.UNMATCHED,
+            ReconciliationStatus.DUPLICATE_CANDIDATE,
+        }:
+            message = "実施した運動に対応する予定を選んでください。"
+        else:
+            message = (
+                f"予定「{_workout_choice_label(result.candidates[0])}」に"
+                "照合しました。異なる場合は修正できます。"
+            )
+        await runtime.messenger.send_quick_reply(line_user_id, message, choices)
+    elif reconciliation.status == ReconciliationStatus.UNPLANNED:
+        await runtime.messenger.send_text(
+            line_user_id, "この運動は計画外Activityとして記録しました。"
+        )
+    await runtime.activity_ingestion_state.complete(activity.id, "reconciliation")
+
+
+def _workout_choice_label(workout) -> str:
+    return f"{workout.scheduled_date.month}/{workout.scheduled_date.day} {workout.workout_type}"[
+        :20
+    ]
+
+
+async def _handle_reconciliation_postback(line_user_id: str, data: str) -> bool:
+    values = {key: items[0] for key, items in parse_qs(data).items() if items}
+    if values.get("action") != "reconciliation":
+        return False
+    activity_id = values.get("activity_id", "")
+    reconciliation_id = values.get("reconciliation_id", "")
+    selected = values.get("planned_workout_id", "")
+    if not activity_id or not reconciliation_id or not selected:
+        raise ReconciliationError("Invalid reconciliation selection")
+    context = await runtime.activity_contexts.get(activity_id)
+    activity = await runtime.activities.get(activity_id)
+    if context is None or context.line_user_id != line_user_id or activity is None:
+        raise ReconciliationError("Activity does not belong to this LINE user")
+    if activity.user_id is None:
+        activity = activity.model_copy(update={"user_id": line_user_id})
+    await _reconciliation_service().correct(
+        user_id=line_user_id,
+        activity=activity,
+        expected_reconciliation_id=reconciliation_id,
+        planned_workout_id=None if selected == "unplanned" else selected,
+    )
+    await runtime.messenger.send_text(line_user_id, "実績の対応を更新しました。")
+    return True
+
+
+async def _handle_missing_reconciliation_postback(line_user_id: str, data: str) -> bool:
+    values = {key: items[0] for key, items in parse_qs(data).items() if items}
+    if values.get("action") != "reconciliation_missing":
+        return False
+    reconciliation_id = values.get("reconciliation_id", "")
+    decision = values.get("decision", "")
+    if not reconciliation_id or decision not in {
+        "not_performed",
+        "sync_pending",
+        "schedule_changed",
+    }:
+        raise ReconciliationError("Invalid missing workout selection")
+    await _reconciliation_service().resolve_missing(
+        user_id=line_user_id,
+        expected_reconciliation_id=reconciliation_id,
+        decision=decision,
+    )
+    messages = {
+        "not_performed": "未実施として記録しました。",
+        "sync_pending": "同期待ちとして保留しました。",
+        "schedule_changed": "予定変更として記録しました。",
+    }
+    await runtime.messenger.send_text(line_user_id, messages[decision])
+    return True
 
 
 async def create_strava_authorization_url(line_user_id: str) -> str:
@@ -653,6 +778,7 @@ async def ingest_activity_task(
         raise HTTPException(
             status_code=502, detail="Strava activity ingestion failed"
         ) from exc
+    await _reconcile_activity(activity, activity.user_id or "")
     logger.info(
         "strava_activity_ingestion_completed event_key=%s activity_id=%s athlete_id=%s",
         event.event_key,
@@ -748,6 +874,56 @@ async def generate_weekly_plan_task(
     result_payload = result.model_dump(mode="json")
     result_payload["plan_status"] = result_payload.pop("status")
     return {"status": "completed", **result_payload}
+
+
+@app.post("/tasks/plans/reconcile-missing", status_code=202)
+async def reconcile_missing_workouts_task(
+    request: Request, task: MissingWorkoutScanTask
+) -> dict[str, object]:
+    await verify_cloud_task_request(request, get_settings())
+    if task.user_id != task.line_user_id:
+        raise HTTPException(status_code=403, detail="Task owner mismatch")
+    if not await runtime.events.reserve("missing_workout_scan", task.operation_id):
+        return {"status": "duplicate"}
+    try:
+        candidates = await _reconciliation_service().missing_candidates(
+            task.user_id,
+            task.local_date,
+            provider_sync_confirmed=task.provider_sync_confirmed,
+        )
+        for candidate in candidates:
+            await runtime.messenger.send_quick_reply(
+                task.line_user_id,
+                "予定した運動の実績が見つかりません。状況を選んでください。",
+                [
+                    (
+                        "未実施",
+                        (
+                            "action=reconciliation_missing&reconciliation_id="
+                            f"{candidate.id}&decision=not_performed"
+                        ),
+                    ),
+                    (
+                        "同期待ち",
+                        (
+                            "action=reconciliation_missing&reconciliation_id="
+                            f"{candidate.id}&decision=sync_pending"
+                        ),
+                    ),
+                    (
+                        "予定変更",
+                        (
+                            "action=reconciliation_missing&reconciliation_id="
+                            f"{candidate.id}&decision=schedule_changed"
+                        ),
+                    ),
+                ],
+            )
+    except Exception:
+        await runtime.events.release("missing_workout_scan", task.operation_id)
+        raise
+    await runtime.events.complete("missing_workout_scan", task.operation_id)
+    return {"status": "completed", "candidate_count": len(candidates)}
 
 
 @app.get("/oauth/strava/start")
@@ -885,6 +1061,10 @@ async def process_line_event(event: dict) -> None:
     try:
         if event_type == "postback":
             data = event.get("postback", {}).get("data", "")
+            if await _handle_missing_reconciliation_postback(line_user_id, data):
+                return
+            if await _handle_reconciliation_postback(line_user_id, data):
+                return
             if await manual_workflow.handle_postback(line_user_id, data):
                 return
             if await weight_workflow.handle_postback(line_user_id, data):
@@ -956,6 +1136,7 @@ async def process_line_event(event: dict) -> None:
         MenuActionError,
         PlanApprovalError,
         ProfileCommandError,
+        ReconciliationError,
     ) as exc:
         await _notify_line(line_user_id, str(exc))
     except LineApiError:
