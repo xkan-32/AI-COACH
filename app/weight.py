@@ -96,7 +96,12 @@ class WeightWorkflow:
         self._settings = settings
         self._clock = clock
 
-    async def start(self, line_user_id: str, text: str = "体重") -> bool:
+    async def start(
+        self,
+        line_user_id: str,
+        text: str = "体重",
+        operation_id: str | None = None,
+    ) -> bool:
         value = text.strip()
         if not _is_weight_command(value):
             return False
@@ -119,7 +124,9 @@ class WeightWorkflow:
             return True
         inline_kg = _inline_kilograms(value)
         if inline_kg is not None:
-            await self.record_kilograms(line_user_id, inline_kg)
+            await self.record_kilograms(
+                line_user_id, inline_kg, operation_id=operation_id
+            )
             return True
         await self.start_today_entry(line_user_id)
         return True
@@ -143,6 +150,7 @@ class WeightWorkflow:
         line_user_id: str,
         kilograms: float,
         measured_on: date | None = None,
+        operation_id: str | None = None,
     ) -> None:
         profile = await self._profile(line_user_id)
         timezone = profile.timezone
@@ -151,7 +159,7 @@ class WeightWorkflow:
         draft = WeightDraft(
             line_user_id=line_user_id,
             user_id=line_user_id,
-            operation_id=str(uuid.uuid4()),
+            operation_id=operation_id or str(uuid.uuid4()),
             step="confirm",
             timezone=timezone,
             measured_on=measured,
@@ -193,7 +201,12 @@ class WeightWorkflow:
         await self._prompt(draft)
         return True
 
-    async def handle_text(self, line_user_id: str, text: str) -> bool:
+    async def handle_text(
+        self,
+        line_user_id: str,
+        text: str,
+        operation_id: str | None = None,
+    ) -> bool:
         value = text.strip()
         if value.lower() in {"cancel", "キャンセル"}:
             draft = await self._drafts.get(line_user_id)
@@ -204,7 +217,7 @@ class WeightWorkflow:
                 line_user_id, "体重の記録をキャンセルしました。"
             )
             return True
-        if await self.start(line_user_id, value):
+        if await self.start(line_user_id, value, operation_id=operation_id):
             return True
         draft = await self._drafts.get(line_user_id)
         if looks_like_kilograms(value) and (
@@ -212,7 +225,10 @@ class WeightWorkflow:
         ):
             measured = draft.measured_on if draft and draft.measured_on else None
             await self.record_kilograms(
-                line_user_id, parse_kilograms(value), measured_on=measured
+                line_user_id,
+                parse_kilograms(value),
+                measured_on=measured,
+                operation_id=operation_id,
             )
             return True
         if draft is None:

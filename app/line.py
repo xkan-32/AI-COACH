@@ -1,17 +1,29 @@
+import logging
 import uuid
+from contextvars import ContextVar
 
 import httpx
 
 from app.domain.models import Activity, WorkoutProposal
 from app.security import ApprovalActionSigner
 
+logger = logging.getLogger(__name__)
+_reply_token: ContextVar[str | None] = ContextVar("line_reply_token", default=None)
+
 
 class LineApiError(RuntimeError):
-    pass
+    def __init__(self, message: str, status_code: int | None = None) -> None:
+        super().__init__(message)
+        self.status_code = status_code
+
+
+def set_line_reply_token(token: str | None) -> None:
+    _reply_token.set(token)
 
 
 class LineConditionPromptSender:
     push_url = "https://api.line.me/v2/bot/message/push"
+    reply_url = "https://api.line.me/v2/bot/message/reply"
 
     def __init__(
         self,
@@ -181,6 +193,8 @@ class LineConditionPromptSender:
         messages: list[dict],
         retry_key: str | None = None,
     ) -> None:
+        if await self._try_reply(messages):
+            return
         try:
             headers = {"Authorization": f"Bearer {self._token}"}
             if retry_key is not None:
@@ -193,7 +207,39 @@ class LineConditionPromptSender:
                 )
                 response.raise_for_status()
         except httpx.HTTPError as exc:
-            raise LineApiError("LINE message failed") from exc
+            raise _line_api_error(exc) from exc
+
+    async def _try_reply(self, messages: list[dict]) -> bool:
+        reply_token = _reply_token.get()
+        if not reply_token:
+            return False
+        _reply_token.set(None)
+        try:
+            async with httpx.AsyncClient(timeout=self._timeout) as client:
+                response = await client.post(
+                    self.reply_url,
+                    headers={"Authorization": f"Bearer {self._token}"},
+                    json={"replyToken": reply_token, "messages": messages},
+                )
+                response.raise_for_status()
+            return True
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code == 400:
+                logger.info("line_reply_rejected falling_back_to_push")
+                return False
+            raise _line_api_error(exc) from exc
+        except httpx.HTTPError as exc:
+            raise _line_api_error(exc) from exc
+
+
+def _line_api_error(exc: httpx.HTTPError) -> LineApiError:
+    status = getattr(getattr(exc, "response", None), "status_code", None)
+    body = ""
+    response = getattr(exc, "response", None)
+    if response is not None:
+        body = (response.text or "")[:200]
+    logger.warning("line_http_error status=%s body=%s", status, body)
+    return LineApiError("LINE message failed", status_code=status)
 
 
 class InMemoryConditionPromptSender:

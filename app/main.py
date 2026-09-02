@@ -26,6 +26,7 @@ from app.domain.models import (
     TrainingEnvironmentCategory,
 )
 from app.ingestion import ActivityIngestionService, UnknownAthleteToken
+from app.line import LineApiError, set_line_reply_token
 from app.line_menu import MenuActionError, MenuActionRouter
 from app.manual_activity import InvalidManualActivityAction, ManualActivityWorkflow
 from app.oauth import InvalidOAuthState, OAuthStateSigner, strava_authorization_url
@@ -847,6 +848,13 @@ async def create_coaching_proposal(report) -> None:
         raise
 
 
+async def _notify_line(line_user_id: str, text: str) -> None:
+    try:
+        await runtime.messenger.send_text(line_user_id, text)
+    except LineApiError:
+        logger.warning("line_error_notice_failed")
+
+
 async def process_line_event(event: dict) -> None:
     workflow = ConditionWorkflow(
         runtime.activity_contexts,
@@ -871,6 +879,9 @@ async def process_line_event(event: dict) -> None:
     weight_workflow = _weight_workflow()
     event_type = event.get("type")
     line_user_id = event.get("source", {}).get("userId", "")
+    event_key = str(event.get("webhookEventId") or "")
+    reply_token = event.get("replyToken")
+    set_line_reply_token(reply_token if isinstance(reply_token, str) else None)
     try:
         if event_type == "postback":
             data = event.get("postback", {}).get("data", "")
@@ -929,10 +940,12 @@ async def process_line_event(event: dict) -> None:
         condition_result = await workflow.handle_text(line_user_id, text)
         if condition_result != "ignored":
             return
-        if await weight_workflow.handle_text(line_user_id, text):
+        if await weight_workflow.handle_text(
+            line_user_id, text, operation_id=event_key or None
+        ):
             return
     except (ApprovalActionError, ProposalExpired):
-        await runtime.messenger.send_text(
+        await _notify_line(
             line_user_id,
             "この操作は期限切れか無効です。最新のメッセージから操作してください。",
         )
@@ -944,7 +957,11 @@ async def process_line_event(event: dict) -> None:
         PlanApprovalError,
         ProfileCommandError,
     ) as exc:
-        await runtime.messenger.send_text(line_user_id, str(exc))
+        await _notify_line(line_user_id, str(exc))
+    except LineApiError:
+        logger.warning("line_message_failed event_type=%s", event_type)
+    finally:
+        set_line_reply_token(None)
 
 
 @app.post("/tasks/line/events")

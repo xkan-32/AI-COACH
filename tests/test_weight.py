@@ -127,6 +127,14 @@ async def test_same_day_correction_keeps_history_and_uses_latest() -> None:
     assert messenger.texts[-1][1].startswith("2026-09-02 70.4kgを訂正しました。")
 
 
+async def test_same_operation_id_does_not_duplicate_a_log() -> None:
+    workflow, _, logs, _, messenger = await make_workflow()
+    await workflow.handle_text("line-1", "70.2", operation_id="evt-1")
+    await workflow.handle_text("line-1", "70.2", operation_id="evt-1")
+    assert len(logs.logs) == 1
+    assert messenger.texts[-1][1].startswith("2026-09-02 70.2kgを記録しました。")
+
+
 async def test_averages_and_goal_delta_use_current_daily_values() -> None:
     logs = InMemoryWeightLogStore()
     targets = InMemoryWeightTargetStore()
