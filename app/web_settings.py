@@ -65,24 +65,34 @@ class FirestoreSettingsLinkStore:
         )
 
     async def consume(self, nonce: str, now: datetime) -> str | None:
+        from google.cloud.firestore_v1.async_transaction import async_transactional
+
         document = self._client.collection("profile_settings_links").document(nonce)
         transaction = self._client.transaction()
-        snapshots = [
-            snapshot
-            async for snapshot in self._client.get_all(
-                [document], transaction=transaction
-            )
-        ]
-        snapshot = snapshots[0] if snapshots else None
-        if snapshot is None or not snapshot.exists:
-            return None
-        values = snapshot.to_dict()
-        expires_at = values.get("expires_at")
-        if values.get("used_at") is not None or expires_at is None or expires_at <= now:
-            return None
-        transaction.update(document, {"used_at": now})
-        await transaction.commit()
-        return str(values["line_user_id"])
+
+        @async_transactional
+        async def consume_once(active_transaction: object) -> str | None:
+            snapshots = [
+                snapshot
+                async for snapshot in self._client.get_all(
+                    [document], transaction=active_transaction
+                )
+            ]
+            snapshot = snapshots[0] if snapshots else None
+            if snapshot is None or not snapshot.exists:
+                return None
+            values = snapshot.to_dict()
+            expires_at = values.get("expires_at")
+            if (
+                values.get("used_at") is not None
+                or expires_at is None
+                or expires_at <= now
+            ):
+                return None
+            active_transaction.update(document, {"used_at": now})
+            return str(values["line_user_id"])
+
+        return await consume_once(transaction)
 
 
 def _encode(value: bytes) -> str:
