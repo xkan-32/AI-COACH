@@ -58,7 +58,7 @@ from app.web_weekly_plan import (
     build_weekly_plan_dto,
 )
 from app.webhooks import verify_line_signature
-from app.weight import InvalidWeightAction, WeightWorkflow
+from app.weight import InvalidWeightAction, WeightWorkflow, parse_kilograms
 
 logger = logging.getLogger(__name__)
 
@@ -90,6 +90,17 @@ class ProfileSettingsInput(BaseModel):
     training_environments: list[EnvironmentInput] = Field(max_length=MAX_ITEMS)
     expected_revision: int = Field(ge=0)
     operation_id: str = Field(min_length=1, max_length=64, pattern=r"^[A-Za-z0-9_-]+$")
+    target_weight_kg: float | None = None
+
+    @field_validator("target_weight_kg")
+    @classmethod
+    def validate_target_weight_kg(cls, value: float | None) -> float | None:
+        if value is None:
+            return None
+        try:
+            return parse_kilograms(str(value))
+        except InvalidWeightAction as exc:
+            raise ValueError(str(exc)) from exc
 
     @model_validator(mode="after")
     def validate_profile(self) -> "ProfileSettingsInput":
@@ -360,6 +371,7 @@ async def get_profile_settings(request: Request) -> dict[str, object]:
             item.model_dump(mode="json") for item in snapshot.training_environments
         ],
         "revision": snapshot.revision,
+        "target_weight_kg": await runtime.weight_targets.get(line_user_id),
         "options": {
             "goal_types": list(GOAL_TYPES),
             "activity_places": sorted(ACTIVITY_PLACES),
@@ -412,6 +424,10 @@ async def update_profile_settings(
             status_code=409,
             detail="設定が更新されています。ページを開き直してください。",
         ) from exc
+    if "target_weight_kg" in payload.model_fields_set:
+        await runtime.weight_targets.save(line_user_id, payload.target_weight_kg)
+        if payload.target_weight_kg is not None:
+            logger.info("weight_target_saved user_id=%s source=settings", line_user_id)
     return {"status": "saved", "revision": revision}
 
 
@@ -908,11 +924,13 @@ async def process_line_event(event: dict) -> None:
             return
         if await manual_workflow.handle_text(line_user_id, text):
             return
-        if await weight_workflow.handle_text(line_user_id, text):
-            return
         if await profile_workflow.handle_text(line_user_id, text):
             return
-        await workflow.handle_text(line_user_id, text)
+        condition_result = await workflow.handle_text(line_user_id, text)
+        if condition_result != "ignored":
+            return
+        if await weight_workflow.handle_text(line_user_id, text):
+            return
     except (ApprovalActionError, ProposalExpired):
         await runtime.messenger.send_text(
             line_user_id,

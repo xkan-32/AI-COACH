@@ -3,7 +3,7 @@ import logging
 import pytest
 from fastapi.testclient import TestClient
 
-from app.line_menu import MENU_MESSAGES
+from app.line_menu import CONDITION_HUB_PROMPT, MENU_MESSAGES
 from app.main import app, runtime
 from app.strava import StravaApiError
 
@@ -45,6 +45,12 @@ def test_line_event_worker_routes_every_rich_menu_action(target: str) -> None:
     elif target == "manual_activity":
         assert runtime.messenger.quick_replies == []
         assert "Strava連携が必要です" in runtime.messenger.texts[-1][1]
+    elif target == "condition":
+        assert runtime.messenger.texts == []
+        assert runtime.messenger.quick_replies[-1][1] == CONDITION_HUB_PROMPT
+        choices = dict(runtime.messenger.quick_replies[-1][2])
+        assert choices["体重"] == "action=weight&op=start"
+        assert "コンディション" in choices
     else:
         assert runtime.messenger.texts == [("U-menu", MENU_MESSAGES[target])]
 
@@ -182,4 +188,91 @@ def test_line_event_worker_starts_weight_recording() -> None:
     )
     assert response.status_code == 200
     assert runtime.messenger.quick_replies
-    assert "体重を記録する日付" in runtime.messenger.quick_replies[-1][1]
+    assert "今日の体重をkgで送ってください" in runtime.messenger.quick_replies[-1][1]
+
+
+def test_line_event_worker_records_bare_weight_number() -> None:
+    from app.main import runtime
+
+    runtime.messenger.texts.clear()
+    runtime.weight_drafts.items.clear()
+    runtime.weight_logs.logs.clear()
+    response = client.post(
+        "/tasks/line/events",
+        json={
+            "event_key": "weight-bare-number",
+            "event": {
+                "type": "message",
+                "source": {"userId": "U-weight-number"},
+                "message": {"type": "text", "text": "70.2"},
+            },
+        },
+    )
+    assert response.status_code == 200
+    saved = next(iter(runtime.weight_logs.logs.values()))
+    assert saved.user_id == "U-weight-number"
+    assert saved.kilograms == 70.2
+    assert runtime.messenger.texts[-1][1].startswith(
+        f"{saved.measured_on.isoformat()} 70.2kgを記録しました。"
+    )
+
+
+def test_line_event_worker_keeps_condition_severity_ahead_of_weight() -> None:
+    from app.condition import ConditionDraft
+    from app.domain.models import ConditionLevel
+
+    runtime.messenger.texts.clear()
+    runtime.weight_logs.logs.clear()
+    runtime.condition_drafts.items["U-condition-weight"] = ConditionDraft(
+        activity_id="activity-1",
+        athlete_id="athlete-1",
+        line_user_id="U-condition-weight",
+        level=ConditionLevel.DISCOMFORT,
+        step="severity",
+        body_part="右膝",
+    )
+    response = client.post(
+        "/tasks/line/events",
+        json={
+            "event_key": "condition-severity-not-weight",
+            "event": {
+                "type": "message",
+                "source": {"userId": "U-condition-weight"},
+                "message": {"type": "text", "text": "8"},
+            },
+        },
+    )
+    assert response.status_code == 200
+    assert runtime.weight_logs.logs == {}
+    assert "悪化しましたか" in runtime.messenger.texts[-1][1]
+
+
+def test_line_event_worker_starts_weight_from_condition_menu() -> None:
+    runtime.messenger.quick_replies.clear()
+    runtime.weight_drafts.items.clear()
+    menu = client.post(
+        "/tasks/line/events",
+        json={
+            "event_key": "condition-hub",
+            "event": {
+                "type": "postback",
+                "source": {"userId": "U-condition-hub"},
+                "postback": {"data": "action=menu&version=1&target=condition"},
+            },
+        },
+    )
+    assert menu.status_code == 200
+    choices = dict(runtime.messenger.quick_replies[-1][2])
+    start = client.post(
+        "/tasks/line/events",
+        json={
+            "event_key": "condition-hub-weight",
+            "event": {
+                "type": "postback",
+                "source": {"userId": "U-condition-hub"},
+                "postback": {"data": choices["体重"]},
+            },
+        },
+    )
+    assert start.status_code == 200
+    assert "今日の体重をkgで送ってください" in runtime.messenger.quick_replies[-1][1]

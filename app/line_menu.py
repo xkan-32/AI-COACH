@@ -33,8 +33,8 @@ MENU_MESSAGES = {
         "届いている最新の提案メッセージを確認してください。"
     ),
     "condition": (
-        "体調記録は、アクティビティ後に届く体調確認メッセージから入力できます。"
-        "リッチメニューからの単独記録は準備中です。"
+        "アクティビティ後の体調は、運動後に届く確認メッセージから入力できます。"
+        "体重は上の「体重」から記録できます。"
     ),
     "manual_activity": (
         "運動の手動記録は準備中です。現時点ではStravaに記録された"
@@ -48,9 +48,16 @@ MENU_MESSAGES = {
     "settings": "目標・運動環境・Strava連携の設定メニューを表示します。",
 }
 
+CONDITION_HUB_PROMPT = "記録する項目を選んでください。"
+WEIGHT_START_POSTBACK = "action=weight&op=start"
+CONDITION_ACTIVITY_POSTBACK = "action=menu&version=1&target=condition_activity"
+
 
 class MenuMessenger(Protocol):
     async def send_text(self, line_user_id: str, text: str) -> None: ...
+    async def send_quick_reply(
+        self, line_user_id: str, text: str, choices: list[tuple[str, str]]
+    ) -> None: ...
 
 
 class MenuActionRouter:
@@ -73,6 +80,19 @@ class MenuActionRouter:
                 "このメニューは現在利用できません。LINEのトーク画面を開き直してください。"
             )
         target = values.get("target", "")
+        if target == "condition":
+            await self._messenger.send_quick_reply(
+                line_user_id,
+                CONDITION_HUB_PROMPT,
+                [
+                    ("体重", WEIGHT_START_POSTBACK),
+                    ("コンディション", CONDITION_ACTIVITY_POSTBACK),
+                ],
+            )
+            return True
+        if target == "condition_activity":
+            await self._messenger.send_text(line_user_id, MENU_MESSAGES["condition"])
+            return True
         if target == "progress" and self._on_progress_requested is not None:
             await self._on_progress_requested(line_user_id)
             return True
