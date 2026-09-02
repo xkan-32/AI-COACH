@@ -50,6 +50,14 @@ from app.ingestion import (
     InMemoryActivityStore,
 )
 from app.line import InMemoryConditionPromptSender, LineConditionPromptSender
+from app.planning import (
+    ActivePlanPointerStore,
+    BigQueryPlanningHistoryStore,
+    FirestoreActivePlanPointerStore,
+    InMemoryActivePlanPointerStore,
+    InMemoryPlanningHistoryStore,
+    PlanningHistoryStore,
+)
 from app.profile import (
     FirestoreGoalStore,
     FirestoreProfileDraftStore,
@@ -60,6 +68,15 @@ from app.profile import (
     InMemoryTrainingResourceStore,
     ProfileDraftStore,
     TrainingResourceStore,
+)
+from app.publication import (
+    BigQueryPublicationHistoryStore,
+    FirestorePublicationApprovalStateStore,
+    InMemoryPublicationApprovalStateStore,
+    InMemoryPublicationHistoryStore,
+    PublicationActionSigner,
+    PublicationApprovalStateStore,
+    PublicationHistoryStore,
 )
 from app.state import (
     EventStore,
@@ -118,6 +135,11 @@ class Runtime:
     training_resources: TrainingResourceStore
     profile_drafts: ProfileDraftStore
     settings_links: SettingsLinkStore
+    planning_history: PlanningHistoryStore
+    active_plan_pointers: ActivePlanPointerStore
+    publication_history: PublicationHistoryStore
+    publication_states: PublicationApprovalStateStore
+    publication_signer: PublicationActionSigner
 
 
 def build_runtime(settings: Settings) -> Runtime:
@@ -151,6 +173,13 @@ def build_runtime(settings: Settings) -> Runtime:
             training_resources=InMemoryTrainingResourceStore(),
             profile_drafts=InMemoryProfileDraftStore(),
             settings_links=InMemorySettingsLinkStore(),
+            planning_history=InMemoryPlanningHistoryStore(),
+            active_plan_pointers=InMemoryActivePlanPointerStore(),
+            publication_history=InMemoryPublicationHistoryStore(),
+            publication_states=InMemoryPublicationApprovalStateStore(),
+            publication_signer=PublicationActionSigner(
+                settings.oauth_state_signing_key
+            ),
         )
     required = {
         "gcp_project_id": settings.gcp_project_id,
@@ -234,4 +263,11 @@ def build_runtime(settings: Settings) -> Runtime:
         training_resources=FirestoreTrainingResourceStore(firestore_client),
         profile_drafts=FirestoreProfileDraftStore(firestore_client),
         settings_links=FirestoreSettingsLinkStore(firestore_client),
+        planning_history=BigQueryPlanningHistoryStore(bigquery_client, table_prefix),
+        active_plan_pointers=FirestoreActivePlanPointerStore(firestore_client),
+        publication_history=BigQueryPublicationHistoryStore(
+            bigquery_client, table_prefix
+        ),
+        publication_states=FirestorePublicationApprovalStateStore(firestore_client),
+        publication_signer=PublicationActionSigner(settings.oauth_state_signing_key),
     )

@@ -37,6 +37,7 @@ Strava Webhook -> Cloud Tasks -> Activity取得・保存
 - LINEリッチメニュー（RM-01〜04: UI、冪等同期、action router、CI/CD同期）
 - PF-01（構造化された目標・運動環境、会話UI、署名付きWeb設定ページ、AI context連携）
 - AC-01（Activity詳細、GPS非保存のLaps/Streams、versioned派生指標、直近履歴のAI context連携）
+- Planning Foundation（週間version、日次ID、実績照合・Review、公開下書き・専用承認domain）
 
 未実装・拡張対象:
 
@@ -126,6 +127,7 @@ PF-01の対象外:
 
 - 長期、週間、日次の階層とversion、変更理由を保持する。
 - 大会日あり、期限なし、複数目標の優先ruleをtestする。
+- 週間version、goal snapshot、日次メニュー、active pointerの基盤は実装済み。PL-01ではAI生成と長期計画を接続する。
 - 再計画でも過去versionを上書きしない。
 - AI失敗時は最後の安全な計画を利用する。
 

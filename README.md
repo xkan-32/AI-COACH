@@ -15,7 +15,7 @@ Stravaのアクティビティ取得を起点に、LINEで体調を確認し、V
 詳細は [docs/implementation-plan.md](docs/implementation-plan.md) と [docs/architecture.md](docs/architecture.md) を参照してください。 初回GCP/WIF/GitHub Actions構築は [docs/bootstrap-and-cicd.md](docs/bootstrap-and-cicd.md) に手順があります。
 
 LINEリッチメニューの現在地と実装計画は [docs/rich-menu-plan.md](docs/rich-menu-plan.md)、機能別Codexセッションの実装順・完了条件・引き継ぎテンプレートは [docs/feature-session-roadmap.md](docs/feature-session-roadmap.md) を参照してください。
-完了したPF-01の設計判断と実装記録は [docs/next-session-pf-01.md](docs/next-session-pf-01.md) にまとめています。AC-01（Activity/Laps/Streams）までコード上実装済みで、次の推奨セッションはMA-01（LINE手動Activity）です。
+完了したPF-01の設計判断と実装記録は [docs/next-session-pf-01.md](docs/next-session-pf-01.md) にまとめています。AC-01と週間計画・実績評価・公開承認の基盤までコード上実装済みで、次の推奨セッションはMA-01（LINE手動Activity）です。
 
 ## ローカル起動
 
@@ -44,7 +44,7 @@ pytest
 
 ## 実装順
 
-MVPのコアフロー、Cloud Tasks、Terraform/CI/CD、LINEリッチメニュー、PF-01、Strava token暗号化、OAuth session期限検証・TTL、Webhook再送の重複排除、GPS非保存の詳細Activity解析と履歴context連携はコード上実装済みです。次はMA-01、監視・DLQ、sandbox E2Eを進めます。実サービスの設定、deploy、秘密値登録は明示的な承認後に行います。
+MVPのコアフロー、Cloud Tasks、Terraform/CI/CD、LINEリッチメニュー、PF-01、Strava token暗号化、OAuth session期限検証・TTL、Webhook再送の重複排除、GPS非保存の詳細Activity解析、versioned週間計画・実績評価・公開承認の基盤はコード上実装済みです。次はMA-01、監視・DLQ、sandbox E2Eを進めます。週間AI生成やnote API連携、実サービスの設定・deployはまだ行いません。
 
 ## LINEテキストコマンド
 

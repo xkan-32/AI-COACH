@@ -40,6 +40,11 @@ StravaのPOST WebhookはCloud Tasksへのenqueue後、2秒以内に`200 OK`を�
 - `goals`: primary/secondary goal, target, date, status
 - `equipment`: available exercise methods and constraints
 - `proposals`: next-day workout, model/prompt version, safety result, approval status
+- `training_plan_versions`: append-only weekly plan versions with goal and AI-input snapshots
+- `planned_workouts`: deterministic daily menus tied to immutable plan versions
+- `workout_reconciliations`: versioned planned-versus-actual matching results
+- `workout_reviews`: objective, condition, dialogue, and next-plan feedback evidence
+- `publication_drafts` / `publication_decisions`: provider-neutral drafts and explicit approval history
 - `webhook_events`: provider event key, received/processed status, retry metadata
 - `audit_events`: approval and Strava mutation evidence
 - `oauth_sessions`: OAuth state nonce, LINE user ID, and `expires_at` with Firestore TTL
@@ -47,6 +52,22 @@ StravaのPOST WebhookはCloud Tasksへのenqueue後、2秒以内に`200 OK`を�
 - `activity_contexts`: activity-to-LINE-user context and `expires_at` with Firestore TTL
 
 BigQuery is used for immutable history and analysis. Firestore is used for OAuth token rotation, webhook idempotency locks, conversation state, and approval state transitions; BigQuery alone is not suitable for these mutable workflows.
+
+## 計画・実績評価feedback loop基盤
+
+`Goal snapshot → TrainingPlanVersion → PlannedWorkout → WorkoutReconciliation → WorkoutReview → 次のTrainingPlanVersion`
+
+- 週間計画は上書きせず、週・athlete・versionから決定的に識別する。Firestoreには週ごとのactive pointerだけを置き、全versionとAI入力snapshotはBigQueryへappend-onlyで保存する。
+- 日次メニューは計画version、日付、sequenceから決定的に識別する。既存の`WorkoutProposal`はnullableな計画FKを持ち、未計画の日次提案も後方互換で扱う。
+- 実績照合はStravaと将来のmanual activityを同じ境界で扱い、matcher versionと客観的な差分を保持する。
+- Reviewは客観要因、体調、対話由来要因を分離し、次計画向けfeedback codeとAI／rule versionを残す。AIによる週間生成、自動照合、未達理由対話は後続機能で接続する。
+
+## 外部公開承認境界
+
+- `PublicationDraft`はnote等に依存しないprovider-neutralな下書きであり、source plan/review、revision、所有者、期限を固定する。
+- 公開承認署名は既存のStrava proposal承認とは別domainで、draft ID、provider、revision、LINE所有者、decision、期限を結び付ける。
+- BigQueryはdraftとdecisionの不変履歴、Firestoreはpending/approved/rejected/expiredの競合制御だけを保持する。
+- Foundationにはprovider adapter呼び出しを含めない。将来の外部公開処理も、有効なLINE明示承認decisionがなければ実行できない。
 
 ## AC-01 詳細Activity・負荷解析
 

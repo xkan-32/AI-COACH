@@ -59,6 +59,16 @@ Exit: every supported response produces a valid, auditable next-day proposal.
 
 Exit: LINEから目標・運動環境を安全かつ冪等に管理でき、次回提案へ反映される。
 
+### Phase 2.6 - Planning and publication foundation（基盤実装済み）
+
+- 目標snapshotを含む週間計画versionと決定的な日次メニューID
+- Strava／manual activityに対応できる実績照合と、客観・体調・対話要因を分離したReview
+- BigQueryのappend-only履歴とFirestoreのactive plan pointer
+- provider非依存の公開draft／decision履歴と、所有者・provider・revision・期限を拘束する専用署名domain
+- 既存の日次`WorkoutProposal`へnullableな計画・Review参照を追加
+
+Exit: 週間AI生成、自動照合、未達理由対話、note adapterを後方互換で接続でき、公開には常に別のLINE明示承認を要求できる。
+
 ### Phase 3 - Approval and Strava update（実装済み）
 
 - Send proposal with approve/reject actions and an expiring signed action token
