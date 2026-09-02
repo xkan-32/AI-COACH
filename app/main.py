@@ -314,15 +314,75 @@ async def create_weekly_plan_url(line_user_id: str) -> str:
         raise PlanApprovalError("週間計画画面は現在利用できません。")
     service = _plan_approval_service()
     plan = await service.current_for_line(line_user_id)
-    if plan is None:
-        plan = await _active_plan_for_line(line_user_id)
-    else:
+    if plan is not None:
         await service.present(plan)
+    else:
+        plan = await _active_plan_for_line(line_user_id)
+        if plan is None:
+            plan = await _generate_initial_plan_for_line(line_user_id)
+            await service.present(plan)
     if plan is None:
         raise PlanApprovalError("確認できる週間計画はまだありません。")
     token, link = _weekly_plan_signer().create_link(line_user_id, plan.id, plan.version)
     await runtime.weekly_plan_links.create(link)
     return f"{base_url.rstrip('/')}/weekly-plan/start?token={quote(token)}"
+
+
+def _weekly_plan_generation_service() -> WeeklyPlanGenerationService:
+    settings = get_settings()
+    return WeeklyPlanGenerationService(
+        runtime.weekly_plan_generator,
+        runtime.planning_history,
+        TrainingSettingsService(
+            runtime.training_settings_state,
+            runtime.training_settings_history,
+        ),
+        runtime.goals,
+        runtime.training_resources,
+        runtime.activities,
+        runtime.condition_reports,
+        settings.vertex_model,
+        _plan_approval_service(),
+    )
+
+
+async def _generate_initial_plan_for_line(line_user_id: str):
+    """Create a conservative current-week draft only after a menu request."""
+    now = datetime.now(UTC)
+    profile = await runtime.training_settings_state.get_profile(line_user_id)
+    if profile is None:
+        profile = UserTrainingProfile(
+            user_id=line_user_id,
+            operation_id="initial-plan-default-profile",
+            updated_at=now,
+        )
+    week_start = profile.local_week_start(now)
+    event_key = (
+        f"initial_weekly_plan:{line_user_id}:{week_start.isoformat()}:{profile.version}"
+    )
+    if not await runtime.events.reserve("weekly_plan_generation", event_key):
+        raise PlanApprovalError(
+            "週間計画を作成中です。少し待ってからもう一度開いてください。"
+        )
+    try:
+        result = await _weekly_plan_generation_service().generate_shadow_plan(
+            user_id=line_user_id,
+            line_user_id=line_user_id,
+            week_start=week_start,
+            plan_version=1,
+            generation_reason="initial_menu_request",
+            input_revision=f"profile-{profile.version}",
+            operation_id=f"initial-menu-{week_start.isoformat()}-v{profile.version}",
+            now=now,
+        )
+    except Exception:
+        await runtime.events.release("weekly_plan_generation", event_key)
+        raise
+    await runtime.events.complete("weekly_plan_generation", event_key)
+    plan = await runtime.planning_history.get_plan(result.plan_id)
+    if plan is None:
+        raise PlanApprovalError("週間計画の作成結果を確認できませんでした。")
+    return plan
 
 
 async def _active_plan_for_line(line_user_id: str):
@@ -1022,20 +1082,7 @@ async def generate_weekly_plan_task(
     )
     if not await runtime.events.reserve("weekly_plan_generation", event_key):
         return {"status": "duplicate"}
-    service = WeeklyPlanGenerationService(
-        runtime.weekly_plan_generator,
-        runtime.planning_history,
-        TrainingSettingsService(
-            runtime.training_settings_state,
-            runtime.training_settings_history,
-        ),
-        runtime.goals,
-        runtime.training_resources,
-        runtime.activities,
-        runtime.condition_reports,
-        settings.vertex_model,
-        _plan_approval_service(),
-    )
+    service = _weekly_plan_generation_service()
     try:
         result = await service.generate_shadow_plan(
             user_id=task.user_id,

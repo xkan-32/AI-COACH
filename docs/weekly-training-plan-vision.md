@@ -473,7 +473,7 @@ AI実行前に制約を作り、AI出力後にも同じ制約で検証する。�
 
 実装済み。手動shadow worker、AI入出力、安全検証、fallback、監査項目は`docs/next-session-pl-01b.md`を参照する。
 
-- 手動起動・shadow modeで翌週計画案を生成する。
+- 手動起動・shadow mode、またはPL-01Gの明示的な初回メニュー要求で週間計画案を生成する。
 - 構造化AI出力、決定論的な事前制約・事後検証、fallbackを実装する。
 - まだ自動Schedulerや本番通知は有効にしない。
 
@@ -513,6 +513,15 @@ AI実行前に制約を作り、AI出力後にも同じ制約で検証する。�
 
 - 翌日のみ、指定日以降、週全体の変更案をversion化する。
 - 承認、拒否、再提案、期限切れ、旧version、二重押下を実装する。
+
+### PL-01G 初回週間計画の生成導線
+
+実装済み。練習メニューを明示的に開いた時点で確認対象の計画がなければ、既存の週間生成・承認境界を使い、安全な初回案を作成して表示する。詳細は`docs/next-session-pl-01g.md`を参照する。
+
+- pending proposalまたはactive planがある場合は、それを表示し、新しいplanを作成しない。
+- 計画がない場合だけ、ユーザーtimezoneの現在週についてconservativeなDRAFTを生成し、既存の初回承認フローへ渡す。
+- 生成はCloud Tasks worker内で行い、ユーザー・週開始日・profile versionからなる冪等keyで重複押下を防ぐ。
+- 承認前にactive pointerを変更せず、Scheduler、通知、自動生成はNT-01まで有効にしない。
 
 ### NT-01 定期実行と運用
 

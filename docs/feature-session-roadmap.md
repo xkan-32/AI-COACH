@@ -147,13 +147,14 @@ PF-01の対象外:
 - 週間version、goal snapshot、日次メニュー、active pointerの基盤は実装済み。PL-01ではAI生成と長期計画を接続する。
 - 再計画でも過去versionを上書きしない。
 - AI失敗時は最後の安全な計画を利用する。
-- 実装はPL-01A（ドメイン契約・設定基盤）、PL-01B（週間生成）、PL-01C（計画画面・初回承認）、PL-01D（実績照合）、PL-01E（Review・Readiness）、PL-01F（承認付き再計画）へ分割する。
+- 実装はPL-01A（ドメイン契約・設定基盤）、PL-01B（週間生成）、PL-01C（計画画面・初回承認）、PL-01D（実績照合）、PL-01E（Review・Readiness）、PL-01F（承認付き再計画）、PL-01G（初回生成導線）へ分割する。
 - PL-01A（ドメイン契約・設定基盤）は完了。実装記録は`docs/next-session-pl-01a.md`を参照する。
 - PL-01B（手動shadow週間生成）は完了。実装記録は`docs/next-session-pl-01b.md`を参照する。
 - PL-01C（週間計画画面・初回承認）は完了。実装記録は`docs/next-session-pl-01c.md`を参照する。
 - PL-01D（実績照合）は完了。実装記録は`docs/next-session-pl-01d.md`を参照する。
 - PL-01E（Workout Review・Readiness）は完了。実装記録は`docs/next-session-pl-01e.md`を参照する。
 - PL-01F（承認付き再計画）は完了。実装記録は`docs/next-session-pl-01f.md`を参照する。
+- PL-01G（初回週間計画の生成導線）は完了。実装記録は`docs/next-session-pl-01g.md`を参照する。
 - 計画の所有主体はapp userとし、Strava未連携・手動Activityのみでも利用可能にする。
 - 安全上`blocked`となった元メニューは、ユーザーが代替案を拒否しても実施可能扱いへ戻さない。
 

@@ -424,3 +424,32 @@ def test_training_menu_opens_one_time_weekly_plan_and_approves() -> None:
         )
         assert revised.status_code == 200
         assert revised.json() == {"status": "active"}
+
+
+def test_training_menu_generates_an_initial_plan_when_none_exists() -> None:
+    from app.main import app, runtime
+
+    user = "weekly-web-initial-plan-user"
+    with TestClient(app) as client:
+        opened = client.post(
+            "/tasks/line/events",
+            json={
+                "event_key": "weekly-web-initial-plan-event",
+                "event": {
+                    "type": "postback",
+                    "source": {"userId": user},
+                    "postback": {"data": "action=menu&version=1&target=training_menu"},
+                },
+            },
+        )
+
+        assert opened.status_code == 200
+        url = runtime.messenger.weekly_plan_links[-1][1]
+        assert client.get(url).status_code == 200
+        dto = client.get("/weekly-plan/api")
+
+    assert dto.status_code == 200
+    body = dto.json()
+    assert body["plan"]["status"] == "pending"
+    assert len(body["plan"]["days"]) == 7
+    assert body["dashboard"]["today"]["date"]
