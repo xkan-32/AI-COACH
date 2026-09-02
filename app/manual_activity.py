@@ -9,6 +9,7 @@ from typing import Protocol
 from urllib.parse import parse_qs, urlencode
 from zoneinfo import ZoneInfo
 
+from app.activity_data import ActivityIngestionStateStore
 from app.condition import ActivityContext, ActivityContextStore, FollowUpMessenger
 from app.domain.models import Activity, ActivitySource, TrainingEnvironment
 from app.ingestion import ActivityStore
@@ -20,6 +21,8 @@ from app.planning import (
     UserTrainingProfile,
 )
 from app.profile import TrainingResourceStore
+from app.state import StravaTokenStore
+from app.strava import StoredStravaToken, StravaApiError, StravaClient
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +40,17 @@ COMPLETION_STATUSES = (
     ("未実施", "skipped"),
 )
 INTENSITIES = (("弱", "easy"), ("中", "moderate"), ("強", "hard"))
+KNOWN_STRAVA_SPORT_TYPES = {
+    "WeightTraining",
+    "Workout",
+    "Run",
+    "Ride",
+    "Walk",
+    "Yoga",
+    "TrailRun",
+    "VirtualRun",
+    "VirtualRide",
+}
 MAX_DETAILS_CHARS = 200
 MAX_COMMENT_CHARS = 200
 MAX_TYPE_CHARS = 40
@@ -51,6 +65,11 @@ class ManualActivityDraftStore(Protocol):
     async def save(self, draft: ManualActivityDraft) -> None: ...
     async def get(self, line_user_id: str) -> ManualActivityDraft | None: ...
     async def delete(self, line_user_id: str) -> None: ...
+
+
+class ManualStravaPublicationStore(Protocol):
+    async def get(self, operation_key: str) -> str | None: ...
+    async def save(self, operation_key: str, strava_activity_id: str) -> None: ...
 
 
 @dataclass
@@ -70,6 +89,7 @@ class ManualActivityDraft:
     environment_ids: list[str] = field(default_factory=list)
     details: str = ""
     comment: str = ""
+    strava_activity_id: str | None = None
     expires_at: datetime = field(default_factory=lambda: datetime.now(UTC) + DRAFT_TTL)
 
 
@@ -84,6 +104,10 @@ class ManualActivityWorkflow:
         environments: TrainingResourceStore | None = None,
         planning_history: PlanningHistoryStore | None = None,
         active_plans: ActivePlanPointerStore | None = None,
+        tokens: StravaTokenStore | None = None,
+        strava: StravaClient | None = None,
+        publications: ManualStravaPublicationStore | None = None,
+        ingestion_state: ActivityIngestionStateStore | None = None,
         on_completed: Callable[[Activity, str], Awaitable[None]] | None = None,
         clock=lambda: datetime.now(UTC),
     ) -> None:
@@ -95,10 +119,16 @@ class ManualActivityWorkflow:
         self._environments = environments
         self._planning_history = planning_history
         self._active_plans = active_plans
+        self._tokens = tokens
+        self._strava = strava
+        self._publications = publications
+        self._ingestion_state = ingestion_state
         self._on_completed = on_completed
         self._clock = clock
 
     async def start(self, line_user_id: str) -> None:
+        if await self._require_token(line_user_id) is None:
+            return
         existing = await self._drafts.get(line_user_id)
         if existing is not None and existing.expires_at > self._clock():
             await self._prompt(existing)
@@ -265,13 +295,19 @@ class ManualActivityWorkflow:
             existing = await self._activities.get(
                 manual_activity_id(line_user_id, operation_id)
             )
+            if existing is None and self._publications is not None:
+                strava_id = await self._publications.get(
+                    manual_activity_id(line_user_id, operation_id)
+                )
+                if strava_id:
+                    existing = await self._activities.get(strava_id)
             if existing is None:
                 raise InvalidManualActivityAction(
                     "入力状態がありません。メニューからやり直してください。"
                 )
             await self._messenger.send_text(
                 line_user_id,
-                "運動を記録しました。Stravaへはまだ投稿していません。",
+                "運動をStravaに記録しました。体調確認のあと、提案を同じActivityへ投稿できます。",
             )
             return True
         self._ensure_fresh(draft)
@@ -280,12 +316,24 @@ class ManualActivityWorkflow:
         return True
 
     async def _complete(self, draft: ManualActivityDraft) -> None:
+        if (
+            draft.activity_type is None
+            or draft.started_at is None
+            or draft.duration_minutes is None
+        ):
+            raise InvalidManualActivityAction("必要な項目が揃っていません。")
+        token = await self._linked_token(draft.line_user_id)
+        if token is None:
+            raise InvalidManualActivityAction(
+                "Strava連携が必要です。「Strava連携」と送って接続してください。"
+            )
+        await self._publish_to_strava(draft, token)
         activity = create_manual_activity(draft)
         existing = await self._activities.get(activity.id)
         if existing is not None and existing != activity:
             raise InvalidManualActivityAction("同じ操作の記録内容が一致しません。")
-        created = existing is None
-        if created:
+        first_save = existing is None
+        if first_save:
             await self._activities.save(activity)
             await self._contexts.save(
                 ActivityContext(
@@ -294,6 +342,9 @@ class ManualActivityWorkflow:
                     line_user_id=draft.line_user_id,
                 )
             )
+            if self._ingestion_state is not None:
+                await self._ingestion_state.complete(activity.id, "activity")
+                await self._ingestion_state.complete(activity.id, "prompt")
         await self._drafts.delete(draft.line_user_id)
         logger.info(
             "manual_activity_saved activity_id=%s source_type=%s completion_status=%s",
@@ -303,10 +354,82 @@ class ManualActivityWorkflow:
         )
         await self._messenger.send_text(
             draft.line_user_id,
-            "運動を記録しました。Stravaへはまだ投稿していません。",
+            "運動をStravaに記録しました。体調確認のあと、提案を同じActivityへ投稿できます。",
         )
-        if created and self._on_completed is not None:
+        if first_save and self._on_completed is not None:
             await self._on_completed(activity, draft.line_user_id)
+
+    async def _publish_to_strava(
+        self, draft: ManualActivityDraft, token: StoredStravaToken
+    ) -> None:
+        if self._strava is None:
+            raise InvalidManualActivityAction("Stravaへの記録を開始できません。")
+        operation_key = manual_activity_id(draft.user_id, draft.operation_id)
+        strava_id = draft.strava_activity_id
+        if strava_id is None and self._publications is not None:
+            strava_id = await self._publications.get(operation_key)
+        if strava_id is None:
+            sport_type, name = _strava_sport_and_name(draft.activity_type or "")
+            local_start = draft.started_at.astimezone(ZoneInfo(draft.timezone)).replace(
+                tzinfo=None
+            )
+            try:
+                created_activity = await self._strava.create_activity(
+                    token.access_token,
+                    name=name,
+                    sport_type=sport_type,
+                    start_date_local=local_start.isoformat(timespec="seconds"),
+                    elapsed_time=(draft.duration_minutes or 0) * 60,
+                    description=draft.comment,
+                )
+            except StravaApiError as exc:
+                logger.info(
+                    "manual_activity_strava_create_failed error_kind=%s strava_status_code=%s",
+                    exc.error_kind,
+                    exc.status_code,
+                )
+                raise InvalidManualActivityAction(
+                    "Stravaへの記録に失敗しました。時間をおいてやり直してください。"
+                ) from exc
+            strava_id = created_activity.id
+            draft.strava_activity_id = strava_id
+            if self._publications is not None:
+                await self._publications.save(operation_key, strava_id)
+            await self._drafts.save(draft)
+        draft.strava_activity_id = strava_id
+        draft.athlete_id = token.athlete_id
+
+    async def _require_token(self, line_user_id: str) -> StoredStravaToken | None:
+        token = await self._linked_token(line_user_id)
+        if token is not None:
+            return token
+        await self._messenger.send_text(
+            line_user_id,
+            "Strava連携が必要です。「Strava連携」と送って接続してから、"
+            "もう一度メニューの運動を記録を押してください。",
+        )
+        return None
+
+    async def _linked_token(self, line_user_id: str) -> StoredStravaToken | None:
+        if self._tokens is None:
+            return None
+        token = await self._tokens.get_by_line_user_id(line_user_id)
+        if token is None:
+            return None
+        if self._strava is None:
+            return token
+        if token.expires_at > int(self._clock().timestamp()) + 300:
+            return token
+        refreshed = await self._strava.refresh(token.refresh_token)
+        updated = StoredStravaToken(
+            athlete_id=token.athlete_id,
+            line_user_id=token.line_user_id,
+            access_token=refreshed.access_token,
+            refresh_token=refreshed.refresh_token,
+            expires_at=refreshed.expires_at,
+        )
+        await self._tokens.save(updated)
+        return updated
 
     async def _prompt(self, draft: ManualActivityDraft) -> None:
         if draft.step == "type":
@@ -408,7 +531,7 @@ class ManualActivityWorkflow:
         )
         await self._messenger.send_quick_reply(
             draft.line_user_id,
-            f"この内容で記録します。\n{summary}",
+            f"この内容でStravaに記録します。\n{summary}",
             [
                 ("記録する", _manual_data(draft, "save")),
                 ("キャンセル", _manual_data(draft, "cancel")),
@@ -550,6 +673,41 @@ class FirestoreManualActivityDraftStore:
         )
 
 
+class InMemoryManualStravaPublicationStore:
+    def __init__(self) -> None:
+        self.items: dict[str, str] = {}
+
+    async def get(self, operation_key: str) -> str | None:
+        return self.items.get(operation_key)
+
+    async def save(self, operation_key: str, strava_activity_id: str) -> None:
+        self.items[operation_key] = strava_activity_id
+
+
+class FirestoreManualStravaPublicationStore:
+    def __init__(self, client: object) -> None:
+        self._client = client
+
+    async def get(self, operation_key: str) -> str | None:
+        snapshot = (
+            await self._client.collection("manual_strava_publications")
+            .document(operation_key)
+            .get()
+        )
+        if not snapshot.exists:
+            return None
+        values = snapshot.to_dict() or {}
+        stored = values.get("strava_activity_id")
+        return str(stored) if stored else None
+
+    async def save(self, operation_key: str, strava_activity_id: str) -> None:
+        await (
+            self._client.collection("manual_strava_publications")
+            .document(operation_key)
+            .set({"strava_activity_id": strava_activity_id})
+        )
+
+
 def create_manual_activity(draft: ManualActivityDraft) -> Activity:
     if (
         draft.activity_type is None
@@ -560,7 +718,9 @@ def create_manual_activity(draft: ManualActivityDraft) -> Activity:
         or draft.athlete_id is None
     ):
         raise InvalidManualActivityAction("必要な項目が揃っていません。")
-    activity_id = manual_activity_id(draft.user_id, draft.operation_id)
+    activity_id = draft.strava_activity_id or manual_activity_id(
+        draft.user_id, draft.operation_id
+    )
     return Activity(
         id=activity_id,
         athlete_id=draft.athlete_id,
@@ -657,5 +817,13 @@ def _draft_from_values(values: dict) -> ManualActivityDraft:
         environment_ids=list(values.get("environment_ids") or []),
         details=values.get("details") or "",
         comment=values.get("comment") or "",
+        strava_activity_id=values.get("strava_activity_id"),
         expires_at=values["expires_at"],
     )
+
+
+def _strava_sport_and_name(activity_type: str) -> tuple[str, str]:
+    labels = {value: label for label, value in MANUAL_ACTIVITY_TYPES}
+    if activity_type in KNOWN_STRAVA_SPORT_TYPES:
+        return activity_type, labels.get(activity_type, activity_type)
+    return "Workout", activity_type

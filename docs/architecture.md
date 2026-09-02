@@ -53,6 +53,7 @@ StravaのPOST WebhookはCloud Tasksへのenqueue後、2秒以内に`200 OK`を�
 - `oauth_sessions`: OAuth state nonce, LINE user ID, and `expires_at` with Firestore TTL
 - `condition_drafts`: in-progress condition response and `expires_at` with Firestore TTL
 - `manual_activity_drafts`: in-progress LINE manual activity input and `expires_at` with Firestore TTL
+- `manual_strava_publications`: operation key to created Strava activity ID for idempotent retries
 - `activity_contexts`: activity-to-LINE-user context and `expires_at` with Firestore TTL
 
 BigQuery is used for immutable history and analysis. Firestore is used for OAuth token rotation, webhook idempotency locks, conversation state, and approval state transitions; BigQuery alone is not suitable for these mutable workflows.
@@ -102,9 +103,10 @@ BigQuery is used for immutable history and analysis. Firestore is used for OAuth
 ## MA-01 LINE手動Activity
 
 - リッチメニューの「運動を記録」から会話を開始し、種目・日時・時間・主観強度・完了状態・任意の計画メニューと運動環境を登録する。
-- 保存先は共通`Activity`境界。`source_type=line_manual`、`user_id`、決定的な`source_activity_id`を持ち、心拍や消費カロリーは推測しない。
-- Firestore draftは24時間TTL。同じ`operation_id`の再送は同一Activity IDへ収束し、内容が変わった場合だけ拒否する。
-- 保存後は既存の体調確認へ接続する。Strava Manual Activity作成と実績照合は後続機能へ残す。
+- 「記録する」はStrava Manual Activity作成の明示承認。未連携では開始せず、確認後に`POST /api/v3/activities`へ作成する。
+- 保存先は共通`Activity`境界。`source_type=line_manual`、`user_id`、Strava Activity IDを`id` / `source_activity_id`に使い、心拍や消費カロリーは推測しない。
+- Firestore draftは24時間TTL。同じoperationの再送はpublication storeのStrava IDへ収束し、内容が変わった場合だけ拒否する。
+- 保存後は既存の体調確認へ接続する。翌日提案の「投稿」は同じStrava ActivityのDescriptionへ追記する。実績照合は後続機能へ残す。
 
 ## AC-01 詳細Activity・負荷解析
 

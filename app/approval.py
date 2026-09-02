@@ -3,8 +3,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Literal, Protocol
 
-from app.domain.models import ActivitySource, ApprovalStatus, WorkoutProposal
-from app.ingestion import ActivityStore
+from app.domain.models import ApprovalStatus, WorkoutProposal
 from app.state import StravaTokenStore
 from app.strava import StoredStravaToken, StravaClient
 
@@ -152,13 +151,11 @@ class ApprovalService:
         analytics: ProposalAnalyticsStore,
         tokens: StravaTokenStore,
         strava: StravaClient,
-        activities: ActivityStore | None = None,
     ) -> None:
         self._states = states
         self._analytics = analytics
         self._tokens = tokens
         self._strava = strava
-        self._activities = activities
 
     async def decide(self, task: ProposalDecisionTask) -> str:
         logger.info(
@@ -173,26 +170,6 @@ class ApprovalService:
             await self._analytics.update_status(proposal.id, ApprovalStatus.REJECTED)
             return "rejected"
         try:
-            source_activity = None
-            if self._activities is not None:
-                source_activity = await self._activities.get(
-                    proposal.source_activity_id
-                )
-            if (
-                source_activity is not None
-                and source_activity.source_type == ActivitySource.LINE_MANUAL
-            ):
-                await self._states.complete(proposal.id)
-                await self._analytics.update_status(
-                    proposal.id, ApprovalStatus.APPROVED
-                )
-                logger.info(
-                    "proposal_decision_completed proposal_id=%s decision=approve "
-                    "activity_id=%s publication=none",
-                    proposal.id,
-                    proposal.source_activity_id,
-                )
-                return "recorded"
             token = await self._tokens.get(proposal.athlete_id)
             if token is None:
                 await self._states.release(proposal.id)

@@ -62,8 +62,11 @@ from app.ingestion import (
 from app.line import InMemoryConditionPromptSender, LineConditionPromptSender
 from app.manual_activity import (
     FirestoreManualActivityDraftStore,
+    FirestoreManualStravaPublicationStore,
     InMemoryManualActivityDraftStore,
+    InMemoryManualStravaPublicationStore,
     ManualActivityDraftStore,
+    ManualStravaPublicationStore,
 )
 from app.plan_approval import (
     FirestorePlanApprovalStateStore,
@@ -168,6 +171,7 @@ class Runtime:
     condition_prompts: ConditionPromptSender
     condition_drafts: ConditionDraftStore
     manual_activity_drafts: ManualActivityDraftStore
+    manual_strava_publications: ManualStravaPublicationStore
     condition_reports: ConditionReportStore
     messenger: FollowUpMessenger
     coach: CoachGenerator
@@ -225,6 +229,7 @@ def build_runtime(settings: Settings) -> Runtime:
             condition_prompts=line,
             condition_drafts=InMemoryConditionDraftStore(),
             manual_activity_drafts=InMemoryManualActivityDraftStore(),
+            manual_strava_publications=InMemoryManualStravaPublicationStore(),
             condition_reports=InMemoryConditionReportStore(),
             messenger=line,
             coach=LocalCoachGenerator(),
@@ -329,6 +334,9 @@ def build_runtime(settings: Settings) -> Runtime:
         condition_prompts=line,
         condition_drafts=FirestoreConditionDraftStore(firestore_client),
         manual_activity_drafts=FirestoreManualActivityDraftStore(firestore_client),
+        manual_strava_publications=FirestoreManualStravaPublicationStore(
+            firestore_client
+        ),
         condition_reports=BigQueryConditionReportStore(
             bigquery_client, f"{table_prefix}.condition_reports"
         ),

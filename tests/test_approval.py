@@ -1,4 +1,4 @@
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 
 import pytest
 
@@ -10,8 +10,7 @@ from app.approval import (
     ProposalOwnerMismatch,
 )
 from app.coaching import InMemoryProposalStore
-from app.domain.models import Activity, ActivitySource, WorkoutProposal
-from app.ingestion import InMemoryActivityStore
+from app.domain.models import Activity, WorkoutProposal
 from app.state import InMemoryStravaTokenStore
 from app.strava import StoredStravaToken
 
@@ -35,8 +34,6 @@ class FakeStrava:
         self.updates: list[str] = []
 
     async def get_activity(self, activity_id: str, access_token: str) -> Activity:
-        from datetime import UTC, datetime
-
         return Activity(
             id=activity_id,
             athlete_id="athlete-1",
@@ -94,36 +91,6 @@ async def test_rejection_does_not_touch_strava() -> None:
     assert analytics.items["proposal-1"].status.value == "rejected"
 
 
-async def test_manual_activity_approval_does_not_call_strava() -> None:
-    strava = FakeStrava()
-    activities = InMemoryActivityStore()
-    await activities.save(
-        Activity(
-            id="activity-1",
-            athlete_id="line-1",
-            activity_type="WeightTraining",
-            started_at=datetime(2026, 9, 2, tzinfo=UTC),
-            duration_seconds=1800,
-            distance_meters=0,
-            source_type=ActivitySource.LINE_MANUAL,
-        )
-    )
-    states = InMemoryProposalStateStore()
-    analytics = InMemoryProposalStore()
-    tokens = InMemoryStravaTokenStore()
-    item = proposal()
-    item.athlete_id = "line-1"
-    await states.save(item, "line-user")
-    await analytics.save(item, "line-user")
-    service = ApprovalService(states, analytics, tokens, strava, activities=activities)
-    assert (
-        await service.decide(ProposalDecisionTask("proposal-1", "line-user", "approve"))
-        == "recorded"
-    )
-    assert strava.updates == []
-    assert analytics.items["proposal-1"].status.value == "approved"
-
-
 async def test_missing_strava_token_does_not_raise_or_update_strava() -> None:
     strava = FakeStrava()
     states = InMemoryProposalStateStore()
@@ -148,8 +115,6 @@ async def test_decision_rejects_different_line_user() -> None:
 
 
 async def test_expired_approval_does_not_touch_strava() -> None:
-    from datetime import UTC, datetime, timedelta
-
     strava = FakeStrava()
     service, states, _ = await setup_service(strava)
     states.items["proposal-1"][0].expires_at = datetime.now(UTC) - timedelta(seconds=1)

@@ -43,8 +43,8 @@ def test_line_event_worker_routes_every_rich_menu_action(target: str) -> None:
             ("U-menu", "確認できる週間計画はまだありません。")
         ]
     elif target == "manual_activity":
-        assert runtime.messenger.quick_replies
-        assert "種目" in runtime.messenger.quick_replies[0][1]
+        assert runtime.messenger.quick_replies == []
+        assert "Strava連携が必要です" in runtime.messenger.texts[-1][1]
     else:
         assert runtime.messenger.texts == [("U-menu", MENU_MESSAGES[target])]
 
@@ -136,13 +136,11 @@ def test_proposal_decision_sends_completion_message(monkeypatch) -> None:
     )
 
 
-def test_proposal_decision_records_manual_activity_without_strava(
-    monkeypatch,
-) -> None:
+def test_proposal_decision_reports_missing_strava_link(monkeypatch) -> None:
     from app.main import runtime
 
     async def fake_decide(self, task):
-        return "recorded"
+        return "missing_strava_link"
 
     monkeypatch.setattr("app.main.ApprovalService.decide", fake_decide)
     runtime.messenger.texts.clear()
@@ -159,5 +157,8 @@ def test_proposal_decision_records_manual_activity_without_strava(
     assert response.status_code == 200
     assert runtime.messenger.texts[-1] == (
         "line-user",
-        "提案を記録しました。Stravaへは投稿していません。",
+        (
+            "Strava連携がないため投稿できません。"
+            "連携後に最新のメッセージから操作してください。"
+        ),
     )

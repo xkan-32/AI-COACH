@@ -168,3 +168,75 @@ async def test_route_stream_is_returned_transiently_without_domain_gps(
 
     assert points[1].distance_meters == 30
     assert points[1].latitude == 35.001
+
+
+async def test_activity_create_exposes_safe_http_error_metadata(monkeypatch) -> None:
+    real_async_client = httpx.AsyncClient
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.method == "POST"
+        assert request.url.path.endswith("/activities")
+        return httpx.Response(
+            400,
+            json={"message": "private upstream response"},
+            request=request,
+        )
+
+    monkeypatch.setattr(
+        httpx,
+        "AsyncClient",
+        lambda **kwargs: real_async_client(
+            transport=httpx.MockTransport(handler), **kwargs
+        ),
+    )
+
+    with pytest.raises(StravaApiError) as raised:
+        await StravaClient("client-id", "client-secret").create_activity(
+            "access-secret",
+            name="ウェイト",
+            sport_type="WeightTraining",
+            start_date_local="2026-09-02T19:00:00",
+            elapsed_time=2700,
+        )
+
+    assert raised.value.status_code == 400
+    assert raised.value.error_kind == "http_status"
+    assert "private upstream response" not in str(raised.value)
+    assert "access-secret" not in str(raised.value)
+
+
+async def test_activity_create_returns_domain_activity(monkeypatch) -> None:
+    real_async_client = httpx.AsyncClient
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            201,
+            json={
+                "id": 9001,
+                "athlete": {"id": 42},
+                "sport_type": "WeightTraining",
+                "start_date": "2026-09-02T10:00:00Z",
+                "moving_time": 2700,
+                "distance": 0,
+                "description": "",
+            },
+            request=request,
+        )
+
+    monkeypatch.setattr(
+        httpx,
+        "AsyncClient",
+        lambda **kwargs: real_async_client(
+            transport=httpx.MockTransport(handler), **kwargs
+        ),
+    )
+
+    activity = await StravaClient("client-id", "client-secret").create_activity(
+        "access-secret",
+        name="ウェイト",
+        sport_type="WeightTraining",
+        start_date_local="2026-09-02T19:00:00",
+        elapsed_time=2700,
+    )
+    assert activity.id == "9001"
+    assert activity.athlete_id == "42"

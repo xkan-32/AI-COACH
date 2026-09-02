@@ -109,7 +109,7 @@ rollbackする場合は、直前commitをrevertしてmainへmergeする。旧画
 |---|---|
 | `today_proposal` | アクティビティ後の体調記録と最新提案メッセージを案内 |
 | `condition` | 既存のアクティビティ後体調確認を案内 |
-| `manual_activity` | LINE会話で手動Activityを登録する。Stravaは直接更新しない |
+| `manual_activity` | LINE会話で手動Activityを登録し、確認後にStravaへ作成する |
 | `goals` | 有効な目標一覧だけを表示。編集は「設定」から行う |
 | `progress` | 準備中と既存フィードバックを案内 |
 | `settings` | 署名・期限付きワンタイムURLの「設定ページを開く」ボタンを表示 |
