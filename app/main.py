@@ -58,6 +58,7 @@ from app.web_weekly_plan import (
     build_weekly_plan_dto,
 )
 from app.webhooks import verify_line_signature
+from app.weight import InvalidWeightAction, WeightWorkflow
 
 logger = logging.getLogger(__name__)
 
@@ -272,6 +273,16 @@ def _manual_activity_workflow() -> ManualActivityWorkflow:
 
 async def start_manual_activity(line_user_id: str) -> None:
     await _manual_activity_workflow().start(line_user_id)
+
+
+def _weight_workflow() -> WeightWorkflow:
+    return WeightWorkflow(
+        runtime.weight_drafts,
+        runtime.weight_logs,
+        runtime.weight_targets,
+        runtime.messenger,
+        settings=runtime.training_settings_state,
+    )
 
 
 async def _send_manual_activity_condition_prompt(activity, line_user_id: str) -> None:
@@ -841,12 +852,15 @@ async def process_line_event(event: dict) -> None:
         on_manual_activity_requested=start_manual_activity,
     )
     manual_workflow = _manual_activity_workflow()
+    weight_workflow = _weight_workflow()
     event_type = event.get("type")
     line_user_id = event.get("source", {}).get("userId", "")
     try:
         if event_type == "postback":
             data = event.get("postback", {}).get("data", "")
             if await manual_workflow.handle_postback(line_user_id, data):
+                return
+            if await weight_workflow.handle_postback(line_user_id, data):
                 return
             if await profile_workflow.handle_postback(line_user_id, data):
                 return
@@ -894,6 +908,8 @@ async def process_line_event(event: dict) -> None:
             return
         if await manual_workflow.handle_text(line_user_id, text):
             return
+        if await weight_workflow.handle_text(line_user_id, text):
+            return
         if await profile_workflow.handle_text(line_user_id, text):
             return
         await workflow.handle_text(line_user_id, text)
@@ -905,6 +921,7 @@ async def process_line_event(event: dict) -> None:
     except (
         InvalidConditionAction,
         InvalidManualActivityAction,
+        InvalidWeightAction,
         MenuActionError,
         PlanApprovalError,
         ProfileCommandError,

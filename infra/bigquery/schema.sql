@@ -442,3 +442,17 @@ CREATE TABLE IF NOT EXISTS `training_coach.webhook_events` (
 )
 PARTITION BY DATE(received_at)
 CLUSTER BY provider, status;
+
+CREATE TABLE IF NOT EXISTS `training_coach.weight_logs` (
+  log_id STRING NOT NULL,
+  user_id STRING NOT NULL,
+  measured_on DATE NOT NULL,
+  kilograms FLOAT64 NOT NULL,
+  unit STRING NOT NULL,
+  recorded_at TIMESTAMP NOT NULL,
+  operation_id STRING NOT NULL,
+  source STRING NOT NULL,
+  supersedes_log_id STRING
+)
+PARTITION BY measured_on
+CLUSTER BY user_id;

@@ -100,6 +100,14 @@ Exit: LINE所有者だけが週間案を確認・決定でき、未承認・却�
 
 Exit: 連携済みユーザーの手動記録がStrava上のActivityになり、提案投稿が同じActivityへ載る。未連携ではStravaを更新しない。
 
+### Phase 2.10 - Weight log（実装済み）
+
+- LINEテキスト「体重」から日付とkgを登録・同日訂正する
+- BigQueryへ不変ログ、Firestoreへ目標体重と会話draft
+- 7日／30日平均と目標差を記録後に表示する。体重数値はアプリケーションログへ出さない
+
+Exit: ユーザーtimezoneの日付で体重を安全に記録でき、平均と目標差を確認できる。
+
 ### Phase 3 - Approval and Strava update（実装済み）
 
 - Send proposal with approve/reject actions and an expiring signed action token
@@ -120,7 +128,7 @@ Exit: only one approved proposal is appended, retries do not duplicate text.
 - Cloud Tasksのretry設定とOIDC付きworker呼び出し
 - TerraformとGitHub ActionsによるCI/CD
 - LINEリッチメニューの冪等同期
-- OAuth session、体調draft、Activity context、プロフィール一時データ、手動Activity draftのFirestore TTL
+- OAuth session、体調draft、Activity context、プロフィール一時データ、手動Activity draft、体重draftのFirestore TTL
 
 残課題:
 
