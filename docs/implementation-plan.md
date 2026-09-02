@@ -74,6 +74,7 @@ Exit: only one approved proposal is appended, retries do not duplicate text.
 - Webhook処理をCloud Tasksへ分離し、handlerは認証・正規化・enqueue後に即時応答
 - Strava Webhookへ`200 OK`を返し、Activity create再送を安定キーで重複排除
 - Cloud Run最小インスタンス0を維持し、startup CPU boostでコールドスタートを短縮
+- Strava Activity取得失敗時に安全な`error_kind`とHTTP status codeを記録し、tokenや上流response本文はログへ出さない
 - Cloud Tasksのretry設定とOIDC付きworker呼び出し
 - TerraformとGitHub ActionsによるCI/CD
 - LINEリッチメニューの冪等同期
@@ -81,7 +82,7 @@ Exit: only one approved proposal is appended, retries do not duplicate text.
 
 残課題:
 
-- dead-letter運用、構造化ログ、監視dashboard、alert
+- dead-letter運用、全処理を横断する構造化ログ、監視dashboard、alert
 - correlation ID、activity ID、proposal IDによる横断追跡
 - データ同意、保持、export、削除flow
 - sandbox E2EとWebhook再送・外部障害・二重承認などのfailure-path試験
@@ -98,7 +99,7 @@ Exit: only one approved proposal is appended, retries do not duplicate text.
 ## Definition of done
 
 - Webhook authenticity and replay/idempotency are enforced.
-- Tokens and secrets live in Secret Manager, never BigQuery or logs.
+- Provider secrets and token-encryption material live in Secret Manager; encrypted Strava OAuth tokens live in Firestore, never BigQuery or logs.
 - AI output conforms to schema and deterministic safety checks.
 - Explicit approval is recorded before Strava mutation.
 - Existing Strava Description text is preserved.

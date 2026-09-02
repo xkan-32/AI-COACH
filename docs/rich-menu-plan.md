@@ -7,7 +7,7 @@ LINEの常設リッチメニュー、冪等なAPI同期、postback router、デ�
 | 項目 | 状態 | 実装内容 |
 |---|---|---|
 | LINE Webhook署名検証 | 実装済み | 不正なWebhookを拒否 |
-| Webhook非同期・重複排除 | 実装済み | Cloud Tasksとevent IDを使用 |
+| Webhook非同期・重複排除 | 実装済み | Cloud Tasksとprovider別event key（LINEは`webhookEventId`、Strava Activity createは安定4要素キー） |
 | Strava連携 | 実装済み | `Strava連携`コマンドからOAuth |
 | 体調確認 | 実装済み | Quick Replyで4択、必要時に詳細質問 |
 | AI翌日提案 | 実装済み | 提案とButtons Templateを送信 |
@@ -32,7 +32,7 @@ Quick ReplyとButtons Templateは対話UIだが、画面下部に常設される
 | 下段中央 | 記録・進捗 | `progress` | 直近活動・週間進捗への入口 |
 | 下段右 | 設定 | `settings` | 目標・運動環境の設定Webページを開く |
 
-未実装機能を押した場合も無反応にせず、「準備中」と利用可能な既存コマンドを案内する。
+`manual_activity`や`progress`などの未実装機能を押した場合も無反応にせず、「準備中」と利用可能な既存コマンドを案内する。
 
 postback dataは次の形式とし、個人情報や権限情報を埋め込まない。
 
