@@ -292,7 +292,7 @@ async def verify_strava_webhook(
     return {"hub.challenge": hub_challenge}
 
 
-@app.post("/webhooks/strava", status_code=202)
+@app.post("/webhooks/strava")
 async def receive_strava_webhook(payload: dict) -> dict[str, str]:
     try:
         event = StravaWebhookEvent.model_validate(payload)

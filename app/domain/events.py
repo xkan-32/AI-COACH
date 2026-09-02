@@ -14,15 +14,15 @@ class StravaWebhookEvent(BaseModel):
 
     @property
     def event_key(self) -> str:
-        return ":".join(
-            (
-                str(self.subscription_id),
-                self.object_type,
-                str(self.object_id),
-                self.aspect_type,
-                str(self.event_time),
-            )
+        parts = (
+            str(self.subscription_id),
+            self.object_type,
+            str(self.object_id),
+            self.aspect_type,
         )
+        if self.is_new_activity:
+            return ":".join(parts)
+        return ":".join((*parts, str(self.event_time)))
 
     @property
     def is_new_activity(self) -> bool:

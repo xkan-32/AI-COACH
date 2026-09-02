@@ -24,6 +24,8 @@ LINE rich menu -> LINE webhook -> Cloud Tasks -> LINE event worker
 
 Webhook handlers authenticate, normalize, enqueue, and acknowledge. Workers own external calls and retries. The initial code keeps orchestration in one deployable service; it can be split without changing domain models.
 
+StravaのPOST WebhookはCloud Tasksへのenqueue後、2秒以内に`200 OK`を返す。Cloud Runは低頻度利用向けに最小インスタンス0とstartup CPU boostを使用するため、コールドスタート時の2秒以内応答は保証しない。Stravaから同じActivity `create`が再送されても、`subscription_id/object_type/object_id/aspect_type`の安定キーで一度だけ処理する。
+
 リッチメニューは既存機能への入口であり、Strava更新権限を持たない。`action=menu`はLINE event worker内のrouterで案内へ変換し、署名・期限付きの`action=proposal`だけが承認workerを起動できる。
 
 ## Data model
