@@ -25,7 +25,7 @@ Quick ReplyとButtons Templateは対話UIだが、画面下部に常設される
 
 | 位置 | 表示 | action | 初期動作 |
 |---|---|---|---|
-| 上段左 | 今日の提案 | `today_proposal` | 最新の有効な提案を表示 |
+| 上段左 | 練習メニュー | `training_menu` | 署名付きURLで今日・今週・最近の実績を表示 |
 | 上段中央 | 体調を記録 | `condition` | 体調ハブ（体重など）をQuick Replyで開始 |
 | 上段右 | 運動を記録 | `manual_activity` | 手動Activity入力を開始 |
 | 下段左 | 目標 | `goals` | 設定済み目標の一覧表示（読み取り専用） |
@@ -37,7 +37,7 @@ Quick ReplyとButtons Templateは対話UIだが、画面下部に常設される
 postback dataは次の形式とし、個人情報や権限情報を埋め込まない。
 
 ```text
-action=menu&version=1&target=today_proposal
+action=menu&version=1&target=training_menu
 action=menu&version=1&target=condition
 action=menu&version=1&target=manual_activity
 action=menu&version=1&target=goals
@@ -107,7 +107,7 @@ rollbackする場合は、直前commitをrevertしてmainへmergeする。旧画
 
 | target | RM-03での応答 |
 |---|---|
-| `today_proposal` | アクティビティ後の体調記録と最新提案メッセージを案内 |
+| `training_menu` | 署名・期限付きURLで練習メニュー画面を開く。今日のメニュー、今週の予定、最近の実績をこの順で表示 |
 | `condition` | 体調ハブを出し、体重記録またはアクティビティ後の体調確認へ進める |
 | `manual_activity` | LINE会話で手動Activityを登録し、確認後にStravaへ作成する |
 | `goals` | 有効な目標一覧だけを表示。編集は「設定」から行う |
@@ -190,4 +190,4 @@ tests/test_rich_menu_sync.py
 | 体重を記録・訂正・集計する | WT-01 | 9月2日70.2kg、7日平均、同日訂正 |
 | 連携状態に応じてmenu自体を切り替える | RM-05 | Strava未連携menu、通常menu |
 
-PF-01、AC-01、PL-01C、PL-01D、PL-01E、PL-01F、MA-01、WT-01は完了している。次の推奨セッションはNT-01（定期実行と運用）である。メニュー画像へ「体重」領域を追加する場合は別のRM変更として扱い、それまでは6領域の座標・画像を変更しない。
+PF-01、AC-01、PL-01C、PL-01D、PL-01E、PL-01F、MA-01、WT-01は完了している。上段左はRM-06として「練習メニュー」へ更新済みである。次の推奨セッションはNT-01（定期実行と運用）である。メニュー画像へ「体重」領域を追加する場合は別のRM変更として扱う。

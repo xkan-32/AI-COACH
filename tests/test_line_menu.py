@@ -83,13 +83,18 @@ def test_definition_has_six_non_overlapping_areas_and_expected_actions() -> None
     assert payload["size"] == {"width": 2500, "height": 1686}
     assert len(payload["areas"]) == 6
     assert [area["action"]["data"] for area in payload["areas"]] == [
-        "action=menu&version=1&target=today_proposal",
+        "action=menu&version=1&target=training_menu",
         "action=menu&version=1&target=condition",
         "action=menu&version=1&target=manual_activity",
         "action=menu&version=1&target=goals",
         "action=menu&version=1&target=progress",
         "action=menu&version=1&target=settings",
     ]
+    assert payload["areas"][0]["action"]["label"] == "練習メニュー"
+    source = (ROOT / "assets/line-rich-menu/rich-menu-v1.source.svg").read_text(
+        encoding="utf-8"
+    )
+    assert "練習メニュー" in source
 
 
 async def test_manual_activity_callback_is_used_when_provided() -> None:

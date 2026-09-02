@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>週間トレーニング計画</title>
+  <title>練習メニュー</title>
   <style>
     :root{color-scheme:light;font-family:system-ui,-apple-system,sans-serif;background:#f4f7f5;color:#17211b}
     body{margin:0}.wrap{max-width:760px;margin:auto;padding:18px}.card{background:#fff;border-radius:14px;padding:16px;margin:12px 0;box-shadow:0 2px 10px #16382012}
@@ -17,9 +17,11 @@
 </head>
 <body>
 <main class="wrap">
-  <h1>週間トレーニング計画</h1>
+  <h1>練習メニュー</h1>
+  <section id="today" aria-label="今日のメニュー"></section>
   <div id="summary" class="card">読み込み中です…</div>
-  <section id="days"></section>
+  <section aria-labelledby="week-heading"><h2 id="week-heading">今週の予定</h2><div id="days"></div></section>
+  <section aria-labelledby="history-heading"><h2 id="history-heading">最近の実績</h2><div id="history"></div></section>
   <div id="approval-card" class="card">
     <h2>計画全体への回答</h2>
     <p class="muted">承認した場合だけ、このversionが実施中の計画になります。</p>
@@ -50,12 +52,16 @@ let state=null;
 const text=(value,fallback="なし")=>value===null||value===undefined||value===""?fallback:String(value);
 const list=value=>(value&&value.length)?value.map(v=>`<span class="tag">${escapeHtml(v)}</span>`).join(""):'<span class="muted">なし</span>';
 const escapeHtml=value=>String(value).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const workoutHtml=workout=>`<div><strong>${escapeHtml(workout.type)}</strong><p>${text(workout.start_time,"時刻指定なし")} / ${text(workout.duration_minutes,0)}分 / ${text(workout.distance_meters)}m / ${escapeHtml(workout.intensity)}</p><div>${list(workout.environment_ids)}</div><p>${escapeHtml(workout.rationale||"日次理由はありません。")}</p><div><span class="muted">安全制約:</span> ${list(workout.safety_constraints)}</div></div>`;
+const activityHtml=activity=>`<article class="card"><strong>${escapeHtml(activity.type)}</strong><p>${escapeHtml(activity.started_at)} / ${text(activity.duration_minutes,0)}分 / ${text(activity.distance_meters,0)}m</p><p>${escapeHtml(activity.intensity||"強度未記録")} / ${escapeHtml(activity.completion_status||"記録済み")}</p></article>`;
 async function load(){
   const response=await fetch("/weekly-plan/api",{headers:{"Accept":"application/json"},cache:"no-store"});
   if(!response.ok)throw new Error((await response.json()).detail||"計画を読み込めませんでした。");
-  state=await response.json(); const plan=state.plan;
+  state=await response.json(); const plan=state.plan; const dashboard=state.dashboard;
+  document.querySelector("#today").innerHTML=`<article class="card day"><h2>今日のメニュー</h2><p class="meta">${escapeHtml(dashboard.today.date)}</p>${dashboard.today.workouts.length?dashboard.today.workouts.map(workoutHtml).join(""):'<p>予定されているメニューはありません。</p>'}</article>`;
   document.querySelector("#summary").innerHTML=`<div class="meta">version ${plan.version} / ${escapeHtml(plan.status)}</div><h2>週間の理由</h2><p>${escapeHtml(plan.rationale||"理由はありません。")}</p><h2>安全制約</h2><div>${list(plan.safety_constraints)}</div><h2>version差分</h2><div>${list(plan.version_changes)}</div>`;
-  document.querySelector("#days").innerHTML=plan.days.map(day=>`<article class="card day"><h2>${escapeHtml(day.date)}</h2>${day.workouts.length?day.workouts.map(workout=>`<div><strong>${escapeHtml(workout.type)}</strong><p>${text(workout.start_time,"時刻指定なし")} / ${text(workout.duration_minutes,0)}分 / ${text(workout.distance_meters)}m / ${escapeHtml(workout.intensity)}</p><div>${list(workout.environment_ids)}</div><p>${escapeHtml(workout.rationale||"日次理由はありません。")}</p><div><span class="muted">安全制約:</span> ${list(workout.safety_constraints)}</div></div>`).join(""):'<p>休養またはメニューなし</p>'}<div><span class="muted">差分:</span> ${list(day.changes)}</div></article>`).join("");
+  document.querySelector("#days").innerHTML=plan.days.map(day=>`<article class="card day"><h2>${escapeHtml(day.date)}</h2>${day.workouts.length?day.workouts.map(workoutHtml).join(""):'<p>休養またはメニューなし</p>'}<div><span class="muted">差分:</span> ${list(day.changes)}</div></article>`).join("");
+  document.querySelector("#history").innerHTML=dashboard.history.activities.length?dashboard.history.activities.map(activityHtml).join(""):'<p class="card muted">最近の実績はまだありません。</p>';
   document.querySelector("#approval-card").hidden=!state.approval;
   document.querySelector("#revision-card").hidden=!(state.revision&&state.revision.enabled);
 }

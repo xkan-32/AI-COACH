@@ -4,7 +4,7 @@ from datetime import UTC, date, datetime, timedelta
 import pytest
 from fastapi.testclient import TestClient
 
-from app.domain.models import Goal, GoalPriority
+from app.domain.models import Activity, ActivitySource, Goal, GoalPriority
 from app.plan_approval import (
     InMemoryPlanApprovalStateStore,
     PlanActionSigner,
@@ -22,6 +22,7 @@ from app.planning import (
 from app.web_weekly_plan import (
     InMemoryWeeklyPlanLinkStore,
     WeeklyPlanWebSigner,
+    build_training_dashboard_dto,
     build_weekly_plan_dto,
 )
 
@@ -302,7 +303,37 @@ async def test_web_dto_has_seven_days_and_excludes_sensitive_snapshot() -> None:
     assert "input_snapshot" not in encoded
 
 
-def test_progress_menu_opens_one_time_weekly_plan_and_approves() -> None:
+async def test_training_dashboard_puts_today_before_safe_activity_history() -> None:
+    _, _, _, _, _, plan, workout, _ = await setup_service()
+    activity = Activity(
+        id="activity-1",
+        athlete_id="athlete-1",
+        user_id=plan.user_id,
+        activity_type="Run",
+        started_at=NOW,
+        duration_seconds=1850,
+        distance_meters=5100,
+        description="画面に返してはいけない説明",
+        details="健康自由記述を返してはいけない",
+        source_type=ActivitySource.LINE_MANUAL,
+        perceived_intensity="easy",
+        completion_status="completed",
+    )
+
+    dashboard = build_training_dashboard_dto(
+        workouts=[workout], local_today=WEEK, activities=[activity]
+    )
+    encoded = json.dumps(dashboard, ensure_ascii=False)
+
+    assert list(dashboard) == ["today", "history"]
+    assert dashboard["today"]["date"] == WEEK.isoformat()
+    assert dashboard["today"]["workouts"][0]["id"] == workout.id
+    assert dashboard["history"]["activities"][0]["duration_minutes"] == 31
+    assert "画面に返してはいけない" not in encoded
+    assert "健康自由記述" not in encoded
+
+
+def test_training_menu_opens_one_time_weekly_plan_and_approves() -> None:
     from app.main import app, runtime
 
     user = "weekly-web-integration-user"
@@ -324,11 +355,11 @@ def test_progress_menu_opens_one_time_weekly_plan_and_approves() -> None:
         opened = client.post(
             "/tasks/line/events",
             json={
-                "event_key": "weekly-web-progress-event",
+                "event_key": "weekly-web-training-menu-event",
                 "event": {
                     "type": "postback",
                     "source": {"userId": user},
-                    "postback": {"data": "action=menu&version=1&target=progress"},
+                    "postback": {"data": "action=menu&version=1&target=training_menu"},
                 },
             },
         )
@@ -355,11 +386,11 @@ def test_progress_menu_opens_one_time_weekly_plan_and_approves() -> None:
         reopened = client.post(
             "/tasks/line/events",
             json={
-                "event_key": "weekly-web-active-progress-event",
+                "event_key": "weekly-web-active-training-menu-event",
                 "event": {
                     "type": "postback",
                     "source": {"userId": user},
-                    "postback": {"data": "action=menu&version=1&target=progress"},
+                    "postback": {"data": "action=menu&version=1&target=training_menu"},
                 },
             },
         )

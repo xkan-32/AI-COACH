@@ -28,10 +28,8 @@ class MenuActionError(ValueError):
 
 
 MENU_MESSAGES = {
-    "today_proposal": (
-        "今日の提案は、直近のアクティビティ後に体調を記録すると作成されます。"
-        "届いている最新の提案メッセージを確認してください。"
-    ),
+    "training_menu": "練習メニューを表示します。",
+    "today_proposal": "練習メニューを表示します。",
     "condition": (
         "アクティビティ後の体調は、運動後に届く確認メッセージから入力できます。"
         "体重は上の「体重」から記録できます。"
@@ -93,7 +91,10 @@ class MenuActionRouter:
         if target == "condition_activity":
             await self._messenger.send_text(line_user_id, MENU_MESSAGES["condition"])
             return True
-        if target == "progress" and self._on_progress_requested is not None:
+        if (
+            target in {"today_proposal", "training_menu", "progress"}
+            and self._on_progress_requested is not None
+        ):
             await self._on_progress_requested(line_user_id)
             return True
         if (
