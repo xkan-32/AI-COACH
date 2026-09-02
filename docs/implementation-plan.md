@@ -1,4 +1,6 @@
-# MVP implementation plan
+# MVP implementation plan and status
+
+> 2026-09-02更新。ここでいう「実装済み」はコードと自動テスト上の状態を示す。実サービスを使うsandbox E2Eと本番運用確認はPhase 4に含める。
 
 ## Confirmed scope
 
@@ -6,7 +8,7 @@ The MVP supports one athlete first while retaining athlete IDs in every record. 
 
 ## Delivery phases
 
-### Phase 0 - Foundation (this initial structure)
+### Phase 0 - Foundation（実装済み）
 
 - FastAPI application and webhook endpoints
 - Domain models, service orchestration, and external-service ports
@@ -17,9 +19,10 @@ The MVP supports one athlete first while retaining athlete IDs in every record. 
 
 Exit: local tests pass; no secrets are committed.
 
-### Phase 1 - Accounts, identity, and ingestion
+### Phase 1 - Accounts, identity, and ingestion（実装済み、hardening継続）
 
-- Create Strava OAuth authorization/callback and encrypted refresh-token storage
+- Create Strava OAuth authorization/callback and Firestore token storage
+- Refresh expired Strava access tokens and persist rotated token values
 - Link Strava athlete ID with LINE user ID
 - Validate and deduplicate webhook events
 - Fetch activity details and insert an immutable activity snapshot into BigQuery
@@ -27,18 +30,39 @@ Exit: local tests pass; no secrets are committed.
 
 Exit: a real Strava activity creates exactly one stored activity and one LINE prompt.
 
-### Phase 2 - Condition and coaching
+残課題:
+
+- Firestoreへ保存するStrava tokenを暗号化または鍵管理された参照方式へ移行する
+- OAuth sessionの`expires_at`を消費時に検証し、TTLを設定する
+
+### Phase 2 - Condition and coaching（コア実装済み）
 
 - Parse LINE postbacks for good/fatigued/discomfort/pain
 - Ask body-part/severity follow-ups only for discomfort or pain
-- Query recent activity, condition, goal, and equipment context
+- Query active goal and equipment context
 - Call Vertex AI with a JSON response schema
 - Apply hard safety constraints before and validate them after generation
-- Persist prompt version, model, inputs, output, and safety decision
+- Persist prompt version, model, proposal output, and approval state
 
 Exit: every supported response produces a valid, auditable next-day proposal.
 
-### Phase 3 - Approval and Strava update
+残課題:
+
+- BigQueryから直近ActivityとCondition履歴を取得し、`CoachingContext`へ渡す
+- AI入力snapshot、安全補正、処理結果を追跡できる監査証跡を完成させる
+
+### Phase 2.5 - Profile and training environment（PF-01実装済み）
+
+- LINEリッチメニューの「目標」から有効目標を一覧表示
+- 「設定」から署名・期限付きワンタイムURLを発行
+- 同じCloud Run上のWeb設定ページで目標・運動環境を一括編集
+- 主目標・副目標、構造化された運動環境、無効化、表記揺れの正規化
+- 旧会話workflowとテキストコマンドを後方互換経路として維持
+- 有効な最新設定をAI coaching contextへ反映
+
+Exit: LINEから目標・運動環境を安全かつ冪等に管理でき、次回提案へ反映される。
+
+### Phase 3 - Approval and Strava update（実装済み）
 
 - Send proposal with approve/reject actions and an expiring signed action token
 - Make approval idempotent
@@ -47,13 +71,22 @@ Exit: every supported response produces a valid, auditable next-day proposal.
 
 Exit: only one approved proposal is appended, retries do not duplicate text.
 
-### Phase 4 - Production readiness
+### Phase 4 - Production readiness（一部実装済み）
 
-- Move webhook work to Cloud Tasks; webhook handlers acknowledge quickly
-- Add retry/dead-letter handling, structured logs, monitoring, and alerts
-- Deploy via Terraform and CI/CD
-- Add data retention/deletion flow and least-privilege service accounts
-- Run sandbox end-to-end and failure-path tests
+実装済み:
+
+- Webhook処理をCloud Tasksへ分離し、handlerは認証・正規化・enqueue後に即時応答
+- Cloud Tasksのretry設定とOIDC付きworker呼び出し
+- TerraformとGitHub ActionsによるCI/CD
+- LINEリッチメニューの冪等同期
+
+残課題:
+
+- dead-letter運用、構造化ログ、監視dashboard、alert
+- correlation ID、activity ID、proposal IDによる横断追跡
+- データ同意、保持、export、削除flow
+- sandbox E2EとWebhook再送・外部障害・二重承認などのfailure-path試験
+- APIとworkerのleast-privilege service account分離
 
 ## Decisions still needed before real-service connection
 
