@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import uuid
 from collections.abc import Awaitable, Callable
+from copy import deepcopy
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, date, datetime, timedelta
 from typing import Protocol
@@ -51,6 +53,33 @@ GOAL_TARGET_EXAMPLES = {
 }
 
 
+def profile_settings_item_id(
+    line_user_id: str, operation_id: str, item_type: str, index: int
+) -> str:
+    return str(
+        uuid.uuid5(
+            uuid.NAMESPACE_URL,
+            f"ai-coach:profile-settings:{line_user_id}:{operation_id}:"
+            f"{item_type}:{index}",
+        )
+    )
+
+
+def profile_settings_fingerprint(
+    goals: list[Goal], training_environments: list[TrainingEnvironment]
+) -> str:
+    payload = {
+        "goals": [item.model_dump(mode="json") for item in goals],
+        "training_environments": [
+            item.model_dump(mode="json") for item in training_environments
+        ],
+    }
+    encoded = json.dumps(
+        payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+    )
+    return hashlib.sha256(encoded.encode()).hexdigest()
+
+
 class GoalStore(Protocol):
     async def list(self, line_user_id: str) -> list[Goal]: ...
     async def save(self, line_user_id: str, goal: Goal) -> None: ...
@@ -80,6 +109,30 @@ class ProfileDraftStore(Protocol):
     async def get(self, line_user_id: str) -> ProfileDraft | None: ...
     async def save(self, draft: ProfileDraft) -> None: ...
     async def delete(self, line_user_id: str) -> None: ...
+
+
+@dataclass(frozen=True)
+class ProfileSettingsSnapshot:
+    goals: list[Goal]
+    training_environments: list[TrainingEnvironment]
+    revision: int
+
+
+class ProfileSettingsConflict(ValueError):
+    pass
+
+
+class ProfileSettingsStore(Protocol):
+    async def get(self, line_user_id: str) -> ProfileSettingsSnapshot: ...
+
+    async def replace(
+        self,
+        line_user_id: str,
+        goals: list[Goal],
+        training_environments: list[TrainingEnvironment],
+        expected_revision: int,
+        operation_id: str,
+    ) -> int: ...
 
 
 class ProfileMessenger(Protocol):
@@ -179,6 +232,100 @@ class InMemoryProfileDraftStore:
 
     async def delete(self, line_user_id: str) -> None:
         self.items.pop(line_user_id, None)
+
+
+class InMemoryProfileSettingsStore:
+    def __init__(
+        self,
+        goals: InMemoryGoalStore,
+        training_environments: InMemoryTrainingResourceStore,
+    ) -> None:
+        self._goals = goals
+        self._training_environments = training_environments
+        self._revisions: dict[str, int] = {}
+        self._operations: dict[str, tuple[str, str]] = {}
+
+    async def get(self, line_user_id: str) -> ProfileSettingsSnapshot:
+        return ProfileSettingsSnapshot(
+            goals=await self._goals.list(line_user_id),
+            training_environments=await self._training_environments.list(line_user_id),
+            revision=self._revisions.get(line_user_id, 0),
+        )
+
+    async def replace(
+        self,
+        line_user_id: str,
+        goals: list[Goal],
+        training_environments: list[TrainingEnvironment],
+        expected_revision: int,
+        operation_id: str,
+    ) -> int:
+        revision = self._revisions.get(line_user_id, 0)
+        fingerprint = profile_settings_fingerprint(goals, training_environments)
+        previous_operation = self._operations.get(line_user_id)
+        if previous_operation and previous_operation[0] == operation_id:
+            if previous_operation[1] != fingerprint:
+                raise ProfileSettingsConflict("Operation payload changed")
+            return revision
+        if revision != expected_revision:
+            raise ProfileSettingsConflict("Profile settings changed")
+
+        current_goal_ids = {item.id for item in await self._goals.list(line_user_id)}
+        current_environment_ids = {
+            item.id for item in await self._training_environments.list(line_user_id)
+        }
+        supplied_goal_ids = {item.id for item in goals if item.id in current_goal_ids}
+        supplied_environment_ids = {
+            item.id
+            for item in training_environments
+            if item.id in current_environment_ids
+        }
+        allowed_new_goal_ids = {
+            profile_settings_item_id(line_user_id, operation_id, "goal", index)
+            for index in range(len(goals))
+        }
+        allowed_new_environment_ids = {
+            profile_settings_item_id(line_user_id, operation_id, "environment", index)
+            for index in range(len(training_environments))
+        }
+        unknown_goal_ids = {
+            item.id
+            for item in goals
+            if item.id not in current_goal_ids and item.id not in allowed_new_goal_ids
+        }
+        unknown_environment_ids = {
+            item.id
+            for item in training_environments
+            if item.id not in current_environment_ids
+            and item.id not in allowed_new_environment_ids
+        }
+        if unknown_goal_ids or unknown_environment_ids:
+            raise ProfileSettingsConflict("Profile settings item changed")
+
+        original_goals = deepcopy(self._goals.items.get(line_user_id, []))
+        original_environments = deepcopy(
+            self._training_environments.items.get(line_user_id, [])
+        )
+        try:
+            for goal_id in current_goal_ids - supplied_goal_ids:
+                await self._goals.deactivate(line_user_id, goal_id)
+            for goal in goals:
+                await self._goals.save(line_user_id, goal)
+            for environment_id in current_environment_ids - supplied_environment_ids:
+                await self._training_environments.deactivate(
+                    line_user_id, environment_id
+                )
+            for environment in training_environments:
+                await self._training_environments.save(line_user_id, environment)
+        except Exception:
+            self._goals.items[line_user_id] = original_goals
+            self._training_environments.items[line_user_id] = original_environments
+            raise
+
+        revision += 1
+        self._revisions[line_user_id] = revision
+        self._operations[line_user_id] = operation_id, fingerprint
+        return revision
 
 
 class FirestoreGoalStore:
@@ -350,6 +497,173 @@ class FirestoreProfileDraftStore:
 
     async def delete(self, line_user_id: str) -> None:
         await self._client.collection("profile_drafts").document(line_user_id).delete()
+
+
+class FirestoreProfileSettingsStore:
+    def __init__(self, client: object) -> None:
+        self._client = client
+
+    def _state_document(self, line_user_id: str):
+        return self._client.collection("profile_settings_state").document(line_user_id)
+
+    async def get(self, line_user_id: str) -> ProfileSettingsSnapshot:
+        from google.cloud.firestore_v1.async_transaction import async_transactional
+
+        await FirestoreTrainingResourceStore(self._client)._ensure_migrated(
+            line_user_id
+        )
+        transaction = self._client.transaction()
+
+        @async_transactional
+        async def read_once(active_transaction: object) -> ProfileSettingsSnapshot:
+            state = await self._state_document(line_user_id).get(
+                transaction=active_transaction
+            )
+            goal_snapshots = await (
+                self._client.collection("goals")
+                .where("line_user_id", "==", line_user_id)
+                .get(transaction=active_transaction)
+            )
+            environment_snapshots = await (
+                self._client.collection("training_environments")
+                .where("line_user_id", "==", line_user_id)
+                .get(transaction=active_transaction)
+            )
+            goals = [
+                goal
+                for snapshot in goal_snapshots
+                if (goal := Goal.model_validate(snapshot.to_dict())).status
+                == GoalStatus.ACTIVE
+            ]
+            training_environments = [
+                environment
+                for snapshot in environment_snapshots
+                if (
+                    environment := TrainingEnvironment.model_validate(
+                        snapshot.to_dict()
+                    )
+                ).status
+                == TrainingEnvironmentStatus.ACTIVE
+            ]
+            revision = int(state.to_dict().get("revision", 0)) if state.exists else 0
+            return ProfileSettingsSnapshot(goals, training_environments, revision)
+
+        return await read_once(transaction)
+
+    async def replace(
+        self,
+        line_user_id: str,
+        goals: list[Goal],
+        training_environments: list[TrainingEnvironment],
+        expected_revision: int,
+        operation_id: str,
+    ) -> int:
+        from google.cloud.firestore_v1.async_transaction import async_transactional
+
+        await FirestoreTrainingResourceStore(self._client)._ensure_migrated(
+            line_user_id
+        )
+        transaction = self._client.transaction()
+
+        @async_transactional
+        async def replace_once(active_transaction: object) -> int:
+            state_document = self._state_document(line_user_id)
+            state = await state_document.get(transaction=active_transaction)
+            state_values = state.to_dict() if state.exists else {}
+            revision = int(state_values.get("revision", 0))
+            fingerprint = profile_settings_fingerprint(goals, training_environments)
+            if state_values.get("last_operation_id") == operation_id:
+                if state_values.get("last_operation_fingerprint") != fingerprint:
+                    raise ProfileSettingsConflict("Operation payload changed")
+                return revision
+            if revision != expected_revision:
+                raise ProfileSettingsConflict("Profile settings changed")
+
+            goal_snapshots = await (
+                self._client.collection("goals")
+                .where("line_user_id", "==", line_user_id)
+                .get(transaction=active_transaction)
+            )
+            environment_snapshots = await (
+                self._client.collection("training_environments")
+                .where("line_user_id", "==", line_user_id)
+                .get(transaction=active_transaction)
+            )
+            active_goal_documents = {
+                snapshot.id: snapshot.reference
+                for snapshot in goal_snapshots
+                if snapshot.to_dict().get("status") == GoalStatus.ACTIVE.value
+            }
+            active_environment_documents = {
+                snapshot.id: snapshot.reference
+                for snapshot in environment_snapshots
+                if snapshot.to_dict().get("status")
+                == TrainingEnvironmentStatus.ACTIVE.value
+            }
+            allowed_new_goal_ids = {
+                profile_settings_item_id(line_user_id, operation_id, "goal", index)
+                for index in range(len(goals))
+            }
+            allowed_new_environment_ids = {
+                profile_settings_item_id(
+                    line_user_id, operation_id, "environment", index
+                )
+                for index in range(len(training_environments))
+            }
+            if any(
+                item.id not in active_goal_documents
+                and item.id not in allowed_new_goal_ids
+                for item in goals
+            ) or any(
+                item.id not in active_environment_documents
+                and item.id not in allowed_new_environment_ids
+                for item in training_environments
+            ):
+                raise ProfileSettingsConflict("Profile settings item changed")
+
+            supplied_goal_ids = {item.id for item in goals}
+            supplied_environment_ids = {item.id for item in training_environments}
+            for item_id, document in active_goal_documents.items():
+                if item_id not in supplied_goal_ids:
+                    active_transaction.update(
+                        document, {"status": GoalStatus.PAUSED.value}
+                    )
+            for goal in goals:
+                values = goal.model_dump(mode="json")
+                values["line_user_id"] = line_user_id
+                active_transaction.set(
+                    self._client.collection("goals").document(goal.id), values
+                )
+            for item_id, document in active_environment_documents.items():
+                if item_id not in supplied_environment_ids:
+                    active_transaction.update(
+                        document,
+                        {"status": TrainingEnvironmentStatus.INACTIVE.value},
+                    )
+            for environment in training_environments:
+                values = environment.model_dump(mode="json")
+                values["line_user_id"] = line_user_id
+                active_transaction.set(
+                    self._client.collection("training_environments").document(
+                        environment.id
+                    ),
+                    values,
+                )
+
+            next_revision = revision + 1
+            active_transaction.set(
+                state_document,
+                {
+                    "line_user_id": line_user_id,
+                    "revision": next_revision,
+                    "last_operation_id": operation_id,
+                    "last_operation_fingerprint": fingerprint,
+                    "updated_at": datetime.now(UTC),
+                },
+            )
+            return next_revision
+
+        return await replace_once(transaction)
 
 
 class ProfileCommandError(ValueError):

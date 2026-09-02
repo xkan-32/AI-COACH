@@ -4,12 +4,20 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
+from app.domain.models import (
+    Goal,
+    GoalPriority,
+    TrainingEnvironment,
+    TrainingEnvironmentCategory,
+)
 from app.line import InMemoryConditionPromptSender
 from app.profile import (
+    FirestoreProfileSettingsStore,
     InMemoryGoalStore,
     InMemoryProfileDraftStore,
     InMemoryTrainingResourceStore,
     ProfileWorkflow,
+    profile_settings_item_id,
 )
 from app.web_settings import (
     FirestoreSettingsLinkStore,
@@ -84,6 +92,116 @@ async def test_firestore_settings_link_reads_through_client_transaction() -> Non
     assert transaction.committed
 
 
+@pytest.mark.asyncio
+async def test_firestore_profile_settings_are_written_in_one_transaction() -> None:
+    class Snapshot:
+        exists = False
+
+        def to_dict(self):
+            return {}
+
+    class Document:
+        def __init__(self, collection: str, item_id: str) -> None:
+            self.collection = collection
+            self.id = item_id
+            self.reference = self
+
+        async def get(self, transaction=None):
+            return Snapshot()
+
+    class Query:
+        def __init__(self, collection: str) -> None:
+            self.collection = collection
+
+        def where(self, *args):
+            return self
+
+        async def get(self, transaction=None):
+            return []
+
+    class Collection(Query):
+        def document(self, item_id: str):
+            return Document(self.collection, item_id)
+
+    class Transaction:
+        def __init__(self) -> None:
+            self._id = None
+            self._read_only = False
+            self._max_attempts = 1
+            self.writes: list[tuple[str, str]] = []
+            self.committed = False
+
+        def _clean_up(self) -> None:
+            self._id = None
+
+        async def _begin(self, retry_id=None) -> None:
+            self._id = b"transaction-id"
+
+        def set(self, document, values) -> None:
+            self.writes.append((document.collection, document.id))
+
+        def update(self, document, values) -> None:
+            self.writes.append((document.collection, document.id))
+
+        async def _commit(self) -> None:
+            self.committed = True
+
+        async def _rollback(self) -> None:
+            pass
+
+    transaction = Transaction()
+
+    class Client:
+        def collection(self, name: str):
+            return Collection(name)
+
+        def transaction(self):
+            return transaction
+
+    operation_id = "firestore-atomic-1"
+    store = FirestoreProfileSettingsStore(Client())
+    revision = await store.replace(
+        "U-firestore-profile",
+        [
+            Goal(
+                id=profile_settings_item_id(
+                    "U-firestore-profile", operation_id, "goal", 0
+                ),
+                goal_type="大会",
+                target="完走",
+                priority=GoalPriority.PRIMARY,
+            )
+        ],
+        [
+            TrainingEnvironment(
+                id=profile_settings_item_id(
+                    "U-firestore-profile", operation_id, "environment", 0
+                ),
+                display_name="ダンベル",
+                category=TrainingEnvironmentCategory.EQUIPMENT,
+            )
+        ],
+        expected_revision=0,
+        operation_id=operation_id,
+    )
+
+    assert revision == 1
+    assert transaction.committed
+    assert transaction.writes == [
+        (
+            "goals",
+            profile_settings_item_id("U-firestore-profile", operation_id, "goal", 0),
+        ),
+        (
+            "training_environments",
+            profile_settings_item_id(
+                "U-firestore-profile", operation_id, "environment", 0
+            ),
+        ),
+        ("profile_settings_state", "U-firestore-profile"),
+    ]
+
+
 def test_settings_page_requires_one_time_link_and_saves_multiple_items() -> None:
     from app.main import app, runtime
 
@@ -108,6 +226,8 @@ def test_settings_page_requires_one_time_link_and_saves_multiple_items() -> None
     saved = client.put(
         "/settings/profile/api",
         json={
+            "expected_revision": 0,
+            "operation_id": "web-settings-save-1",
             "goals": [
                 {
                     "goal_type": "大会",
@@ -138,6 +258,74 @@ def test_settings_page_requires_one_time_link_and_saves_multiple_items() -> None
         "インドアバイク",
         "ダンベル",
     }
+    assert current["revision"] == 1
+
+
+def test_settings_api_normalizes_alias_preserves_other_detail_and_is_idempotent() -> (
+    None
+):
+    from app.main import app, runtime
+
+    client = TestClient(app)
+    runtime.messenger.settings_links.clear()
+    response = client.post(
+        "/tasks/line/events",
+        json={
+            "event_key": "web-settings-normalization-test",
+            "event": {
+                "type": "postback",
+                "source": {"userId": "U-web-normalization"},
+                "postback": {"data": "action=menu&version=1&target=settings"},
+            },
+        },
+    )
+    assert response.status_code == 200
+    assert client.get(runtime.messenger.settings_links[-1][1]).status_code == 200
+
+    payload = {
+        "expected_revision": 0,
+        "operation_id": "web-settings-normalize-1",
+        "goals": [],
+        "training_environments": [
+            {"display_name": "ルームバイク", "category": "other"},
+            {"display_name": "河川敷の階段", "category": "activity_place"},
+        ],
+    }
+    first = client.put("/settings/profile/api", json=payload)
+    retry = client.put("/settings/profile/api", json=payload)
+
+    assert first.status_code == 200
+    assert retry.status_code == 200
+    assert first.json()["revision"] == retry.json()["revision"] == 1
+    current = client.get("/settings/profile/api").json()
+    assert current["training_environments"] == [
+        {
+            "id": current["training_environments"][0]["id"],
+            "display_name": "インドアバイク",
+            "category": "activity_place",
+            "status": "active",
+            "detail": None,
+        },
+        {
+            "id": current["training_environments"][1]["id"],
+            "display_name": "河川敷の階段",
+            "category": "other",
+            "status": "active",
+            "detail": "河川敷の階段",
+        },
+    ]
+
+    changed_retry = client.put(
+        "/settings/profile/api",
+        json={**payload, "training_environments": []},
+    )
+    assert changed_retry.status_code == 409
+
+    conflict = client.put(
+        "/settings/profile/api",
+        json={**payload, "operation_id": "web-settings-normalize-2"},
+    )
+    assert conflict.status_code == 409
 
 
 def test_settings_api_rejects_unauthenticated_request() -> None:
@@ -156,6 +344,9 @@ def test_settings_page_has_mobile_goal_controls() -> None:
     assert "input[type=date]{min-height:46px" in page
     assert "font-size:16px" in page
     assert "maximum-scale" not in page
+    assert "detail:entered" in page
+    assert "apiError" in page
+    assert "expected_revision:state.revision" in page
 
 
 def test_settings_link_is_signed_expires_and_does_not_expose_user_id() -> None:

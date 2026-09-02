@@ -1,5 +1,4 @@
 import logging
-import uuid
 from datetime import UTC, date, datetime
 from pathlib import Path
 from urllib.parse import parse_qs, quote
@@ -36,7 +35,9 @@ from app.profile import (
     GOAL_TYPES,
     MAX_ITEMS,
     ProfileCommandError,
+    ProfileSettingsConflict,
     ProfileWorkflow,
+    profile_settings_item_id,
 )
 from app.runtime import build_runtime
 from app.security import (
@@ -74,6 +75,8 @@ class EnvironmentInput(BaseModel):
 class ProfileSettingsInput(BaseModel):
     goals: list[GoalInput] = Field(max_length=MAX_ITEMS)
     training_environments: list[EnvironmentInput] = Field(max_length=MAX_ITEMS)
+    expected_revision: int = Field(ge=0)
+    operation_id: str = Field(min_length=1, max_length=64, pattern=r"^[A-Za-z0-9_-]+$")
 
     @model_validator(mode="after")
     def validate_profile(self) -> "ProfileSettingsInput":
@@ -84,11 +87,16 @@ class ProfileSettingsInput(BaseModel):
             raise ValueError("目標を登録する場合、主目標を1件選択してください。")
         if any(goal.goal_type not in GOAL_TYPES for goal in self.goals):
             raise ValueError("未対応の目標種別です。")
+        for goal in self.goals:
+            goal.target = goal.target.strip()
+            if not goal.target:
+                raise ValueError("目標の内容を入力してください。")
         keys: set[tuple[str, str]] = set()
         for item in self.training_environments:
-            name = ENVIRONMENT_ALIASES.get(
-                item.display_name.strip(), item.display_name.strip()
-            )
+            raw_name = item.display_name.strip()
+            if not raw_name:
+                raise ValueError("運動環境の名前を入力してください。")
+            name = ENVIRONMENT_ALIASES.get(raw_name, raw_name)
             expected = (
                 TrainingEnvironmentCategory.ACTIVITY_PLACE
                 if name in ACTIVITY_PLACES
@@ -96,9 +104,13 @@ class ProfileSettingsInput(BaseModel):
                 if name in EQUIPMENT
                 else TrainingEnvironmentCategory.OTHER
             )
-            if item.category != expected:
-                raise ValueError("運動環境の区分が表示名と一致しません。")
-            key = (item.category.value, name)
+            item.display_name = name
+            item.category = expected
+            if expected == TrainingEnvironmentCategory.OTHER:
+                item.detail = (item.detail or raw_name).strip()
+            elif item.detail:
+                item.detail = item.detail.strip() or None
+            key = (expected.value, name)
             if key in keys:
                 raise ValueError("同じ運動環境が重複しています。")
             keys.add(key)
@@ -208,15 +220,13 @@ async def profile_settings_page(request: Request) -> FileResponse:
 @app.get("/settings/profile/api")
 async def get_profile_settings(request: Request) -> dict[str, object]:
     line_user_id = _settings_user(request)
+    snapshot = await runtime.profile_settings.get(line_user_id)
     return {
-        "goals": [
-            goal.model_dump(mode="json")
-            for goal in await runtime.goals.list(line_user_id)
-        ],
+        "goals": [goal.model_dump(mode="json") for goal in snapshot.goals],
         "training_environments": [
-            item.model_dump(mode="json")
-            for item in await runtime.training_resources.list(line_user_id)
+            item.model_dump(mode="json") for item in snapshot.training_environments
         ],
+        "revision": snapshot.revision,
         "options": {
             "goal_types": list(GOAL_TYPES),
             "activity_places": sorted(ACTIVITY_PLACES),
@@ -228,56 +238,48 @@ async def get_profile_settings(request: Request) -> dict[str, object]:
 @app.put("/settings/profile/api")
 async def update_profile_settings(
     request: Request, payload: ProfileSettingsInput
-) -> dict[str, str]:
+) -> dict[str, object]:
     line_user_id = _settings_user(request)
     _check_settings_origin(request)
-    current_goals = {goal.id: goal for goal in await runtime.goals.list(line_user_id)}
-    current_environments = {
-        item.id: item for item in await runtime.training_resources.list(line_user_id)
-    }
-    supplied_goal_ids = {item.id for item in payload.goals if item.id}
-    supplied_environment_ids = {
-        item.id for item in payload.training_environments if item.id
-    }
-    if (
-        not supplied_goal_ids <= current_goals.keys()
-        or not supplied_environment_ids <= current_environments.keys()
-    ):
+    goals = [
+        Goal(
+            id=item.id
+            or profile_settings_item_id(
+                line_user_id, payload.operation_id, "goal", index
+            ),
+            goal_type=item.goal_type,
+            target=item.target,
+            target_date=item.target_date,
+            priority=item.priority,
+        )
+        for index, item in enumerate(payload.goals)
+    ]
+    training_environments = [
+        TrainingEnvironment(
+            id=item.id
+            or profile_settings_item_id(
+                line_user_id, payload.operation_id, "environment", index
+            ),
+            display_name=item.display_name,
+            category=item.category,
+            detail=item.detail,
+        )
+        for index, item in enumerate(payload.training_environments)
+    ]
+    try:
+        revision = await runtime.profile_settings.replace(
+            line_user_id,
+            goals,
+            training_environments,
+            payload.expected_revision,
+            payload.operation_id,
+        )
+    except ProfileSettingsConflict as exc:
         raise HTTPException(
             status_code=409,
             detail="設定が更新されています。ページを開き直してください。",
-        )
-
-    for goal_id in current_goals.keys() - supplied_goal_ids:
-        await runtime.goals.deactivate(line_user_id, goal_id)
-    for item in payload.goals:
-        await runtime.goals.save(
-            line_user_id,
-            Goal(
-                id=item.id or str(uuid.uuid4()),
-                goal_type=item.goal_type,
-                target=item.target.strip(),
-                target_date=item.target_date,
-                priority=item.priority,
-            ),
-        )
-
-    for resource_id in current_environments.keys() - supplied_environment_ids:
-        await runtime.training_resources.deactivate(line_user_id, resource_id)
-    for item in payload.training_environments:
-        display_name = ENVIRONMENT_ALIASES.get(
-            item.display_name.strip(), item.display_name.strip()
-        )
-        await runtime.training_resources.save(
-            line_user_id,
-            TrainingEnvironment(
-                id=item.id or str(uuid.uuid4()),
-                display_name=display_name,
-                category=item.category,
-                detail=item.detail.strip() if item.detail else None,
-            ),
-        )
-    return {"status": "saved"}
+        ) from exc
+    return {"status": "saved", "revision": revision}
 
 
 @app.get("/webhooks/strava")

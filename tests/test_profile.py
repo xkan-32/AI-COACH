@@ -2,16 +2,24 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from app.domain.models import CoachingContext, GoalPriority, TrainingEnvironmentCategory
+from app.domain.models import (
+    CoachingContext,
+    Goal,
+    GoalPriority,
+    TrainingEnvironment,
+    TrainingEnvironmentCategory,
+)
 from app.line import InMemoryConditionPromptSender
 from app.profile import (
     InMemoryGoalStore,
     InMemoryProfileDraftStore,
+    InMemoryProfileSettingsStore,
     InMemoryTrainingResourceStore,
     ProfileCommandError,
     ProfileCommandService,
     ProfileDraft,
     ProfileWorkflow,
+    profile_settings_item_id,
 )
 
 
@@ -304,6 +312,69 @@ async def test_only_latest_active_profile_is_passed_to_coaching_context() -> Non
     assert [item.display_name for item in context.training_resources] == [
         "自宅トレーニング"
     ]
+
+
+async def test_web_profile_replace_rolls_back_both_sections_on_failure() -> None:
+    class FailingTrainingResourceStore(InMemoryTrainingResourceStore):
+        fail = False
+
+        async def save(self, line_user_id: str, resource: TrainingEnvironment) -> None:
+            if self.fail:
+                raise RuntimeError("simulated save failure")
+            await super().save(line_user_id, resource)
+
+    goals = InMemoryGoalStore()
+    resources = FailingTrainingResourceStore()
+    await goals.save(
+        "line-1",
+        Goal(
+            id="existing-goal",
+            goal_type="大会",
+            target="既存目標",
+            priority=GoalPriority.PRIMARY,
+        ),
+    )
+    await resources.save(
+        "line-1",
+        TrainingEnvironment(
+            id="existing-environment",
+            display_name="ダンベル",
+            category=TrainingEnvironmentCategory.EQUIPMENT,
+        ),
+    )
+    store = InMemoryProfileSettingsStore(goals, resources)
+    operation_id = "atomic-save-1"
+    resources.fail = True
+
+    with pytest.raises(RuntimeError, match="simulated"):
+        await store.replace(
+            "line-1",
+            [
+                Goal(
+                    id=profile_settings_item_id("line-1", operation_id, "goal", 0),
+                    goal_type="運動習慣",
+                    target="新しい目標",
+                    priority=GoalPriority.PRIMARY,
+                )
+            ],
+            [
+                TrainingEnvironment(
+                    id=profile_settings_item_id(
+                        "line-1", operation_id, "environment", 0
+                    ),
+                    display_name="自重",
+                    category=TrainingEnvironmentCategory.EQUIPMENT,
+                )
+            ],
+            expected_revision=0,
+            operation_id=operation_id,
+        )
+
+    assert [item.target for item in await goals.list("line-1")] == ["既存目標"]
+    assert [item.display_name for item in await resources.list("line-1")] == [
+        "ダンベル"
+    ]
+    assert (await store.get("line-1")).revision == 0
 
 
 async def test_rejects_invalid_goal_date() -> None:
