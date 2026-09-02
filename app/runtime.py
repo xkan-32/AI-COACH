@@ -69,6 +69,7 @@ from app.tasks import (
     LineEventTaskPublisher,
     ProposalDecisionPublisher,
 )
+from app.token_crypto import AesGcmTokenCipher
 from app.web_settings import (
     FirestoreSettingsLinkStore,
     InMemorySettingsLinkStore,
@@ -135,6 +136,7 @@ def build_runtime(settings: Settings) -> Runtime:
         "worker_url": settings.worker_url,
         "task_service_account_email": settings.task_service_account_email,
         "line_channel_access_token": settings.line_channel_access_token,
+        "token_encryption_key": settings.token_encryption_key,
     }
     missing = [name for name, value in required.items() if not value]
     if missing:
@@ -162,7 +164,9 @@ def build_runtime(settings: Settings) -> Runtime:
     return Runtime(
         events=FirestoreEventStore(firestore_client),
         oauth_sessions=FirestoreOAuthSessionStore(firestore_client),
-        tokens=FirestoreStravaTokenStore(firestore_client),
+        tokens=FirestoreStravaTokenStore(
+            firestore_client, AesGcmTokenCipher(settings.token_encryption_key)
+        ),
         tasks=CloudTasksActivityPublisher(
             tasks_v2.CloudTasksAsyncClient,
             settings.cloud_tasks_queue_path,

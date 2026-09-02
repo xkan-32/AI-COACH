@@ -128,15 +128,32 @@ gcloud secrets versions add strava-verify-token --data-file=-
 gcloud secrets versions add line-channel-secret --data-file=-
 gcloud secrets versions add line-channel-access-token --data-file=-
 gcloud secrets versions add oauth-state-signing-key --data-file=-
+gcloud secrets versions add strava-token-encryption-key --data-file=-
 ```
 
-Generate the OAuth signing key and Strava verify token with a cryptographically secure generator, for example:
+Generate the OAuth signing key and Strava verify token with a cryptographically secure generator. Generate the AES-256-GCM token-encryption key as exactly 32 random bytes:
 
 ```bash
 openssl rand -base64 48
+openssl rand -base64 32
 ```
 
-Run it separately for each generated value. Secret payloads are the only GCP configuration intentionally not managed by Terraform.
+Run the appropriate command separately for each generated value. Secret payloads are the only GCP configuration intentionally not managed by Terraform. Production startup requires `strava-token-encryption-key`; do not rotate it until all existing `strava_tokens` documents have been re-encrypted with the replacement key. `scripts/register-provider-secrets.sh` creates this key only when no enabled version exists.
+
+### Existing environment migration
+
+Before deploying the token-encryption change to an existing environment, create only the Terraform-managed secret container, add its first payload, and then run the normal complete apply:
+
+```bash
+terraform apply \
+  -target='google_secret_manager_secret.provider["strava-token-encryption-key"]'
+openssl rand -base64 32 | gcloud secrets versions add \
+  strava-token-encryption-key --data-file=-
+terraform plan
+terraform apply
+```
+
+Existing plaintext `strava_tokens` documents remain readable during rollout and are replaced with encrypted fields on their next read. Do not roll back to an application version that cannot read encrypted documents after migration has started.
 
 ## 8. Build and push the first image
 
