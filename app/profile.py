@@ -4,7 +4,7 @@ import uuid
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, date, datetime, timedelta
 from typing import Protocol
-from urllib.parse import parse_qs
+from urllib.parse import parse_qs, urlencode
 
 from app.domain.models import (
     Goal,
@@ -70,6 +70,19 @@ class ProfileDraftStore(Protocol):
     async def get(self, line_user_id: str) -> ProfileDraft | None: ...
     async def save(self, draft: ProfileDraft) -> None: ...
     async def delete(self, line_user_id: str) -> None: ...
+
+
+class ProfileMessenger(Protocol):
+    async def send_text(self, line_user_id: str, text: str) -> None: ...
+    async def send_quick_reply(
+        self, line_user_id: str, text: str, choices: list[tuple[str, str]]
+    ) -> None: ...
+
+
+def profile_action(section: str, operation: str, **values: str) -> str:
+    return urlencode(
+        {"action": "profile", "section": section, "operation": operation, **values}
+    )
 
 
 class InMemoryGoalStore:
@@ -471,7 +484,7 @@ class ProfileWorkflow:
         goals: GoalStore,
         resources: TrainingResourceStore,
         drafts: ProfileDraftStore,
-        messenger: object,
+        messenger: ProfileMessenger,
         clock=lambda: datetime.now(UTC),
     ) -> None:
         self._goals = goals
@@ -483,20 +496,213 @@ class ProfileWorkflow:
 
     async def handle_postback(self, line_user_id: str, data: str) -> bool:
         values = {key: items[0] for key, items in parse_qs(data).items() if items}
-        if values.get("action") != "menu" or values.get("version") != "1":
+        if values.get("action") == "menu" and values.get("version") == "1":
+            if values.get("target") == "goals":
+                await self._show_goal_menu(line_user_id)
+                return True
+            if values.get("target") == "settings":
+                await self._show_settings_menu(line_user_id)
+                return True
             return False
-        if values.get("target") == "goals":
-            await self._commands.handle(line_user_id, "目標確認")
-            await self._messenger.send_text(
-                line_user_id, "操作: 目標追加 / 目標変更 / 目標無効化 / キャンセル"
-            )
+        if values.get("action") != "profile":
+            return False
+        section = values.get("section", "")
+        operation = values.get("operation", "")
+        if operation == "cancel":
+            return await self.handle_text(line_user_id, "キャンセル")
+        if section == "goals":
+            await self._handle_goal_postback(line_user_id, operation, values)
             return True
-        if values.get("target") == "settings":
-            await self._messenger.send_text(
-                line_user_id, "設定を選んでください。\n目標 / 運動環境 / Strava連携"
-            )
+        if section == "environments":
+            await self._handle_environment_postback(line_user_id, operation, values)
             return True
-        return False
+        raise ProfileCommandError("選択された設定項目を確認できませんでした。")
+
+    async def _show_settings_menu(self, user: str) -> None:
+        await self._messenger.send_quick_reply(
+            user,
+            "設定する項目を選んでください。",
+            [
+                ("目標", profile_action("goals", "menu")),
+                ("運動環境", profile_action("environments", "menu")),
+                ("キャンセル", profile_action("settings", "cancel")),
+            ],
+        )
+
+    async def _show_goal_menu(self, user: str) -> None:
+        await self._commands.handle(user, "目標確認")
+        goals = await self._goals.list(user)
+        choices = [("追加", profile_action("goals", "add"))]
+        if goals:
+            choices.extend(
+                [
+                    ("変更", profile_action("goals", "change")),
+                    ("無効化", profile_action("goals", "deactivate")),
+                ]
+            )
+        choices.append(("キャンセル", profile_action("goals", "cancel")))
+        await self._messenger.send_quick_reply(
+            user, "目標の操作を選んでください。", choices
+        )
+
+    async def _show_environment_menu(self, user: str) -> None:
+        await self._commands.handle(user, "運動環境確認")
+        resources = await self._resources.list(user)
+        choices = [("追加", profile_action("environments", "add"))]
+        if resources:
+            choices.extend(
+                [
+                    ("変更", profile_action("environments", "change")),
+                    ("無効化", profile_action("environments", "deactivate")),
+                ]
+            )
+        choices.append(("キャンセル", profile_action("environments", "cancel")))
+        await self._messenger.send_quick_reply(
+            user, "運動環境の操作を選んでください。", choices
+        )
+
+    async def _handle_goal_postback(
+        self, user: str, operation: str, values: dict[str, str]
+    ) -> None:
+        if operation == "menu":
+            await self._show_goal_menu(user)
+            return
+        if operation == "add":
+            await self._drafts.delete(user)
+            await self.handle_text(user, "目標追加")
+            await self._messenger.send_quick_reply(
+                user,
+                "主目標または副目標を選んでください。",
+                [
+                    ("主目標", profile_action("goals", "priority", value="主目標")),
+                    ("副目標", profile_action("goals", "priority", value="副目標")),
+                    ("キャンセル", profile_action("goals", "cancel")),
+                ],
+            )
+            return
+        if operation == "priority":
+            await self._continue(
+                user, values.get("value", ""), await self._active_draft(user)
+            )
+            return
+        if operation in {"change", "deactivate"}:
+            await self._drafts.delete(user)
+            await self.handle_text(
+                user, "目標変更" if operation == "change" else "目標無効化"
+            )
+            goals = await self._goals.list(user)
+            if not goals:
+                await self._drafts.delete(user)
+                raise ProfileCommandError("変更できる目標がありません。")
+            await self._messenger.send_quick_reply(
+                user,
+                "対象の目標を選んでください。",
+                [
+                    (
+                        f"{goal.goal_type}: {goal.target}"[:20],
+                        profile_action("goals", "select", value=goal.id),
+                    )
+                    for goal in goals[:12]
+                ]
+                + [("キャンセル", profile_action("goals", "cancel"))],
+            )
+            return
+        if operation == "select":
+            await self._continue(
+                user, values.get("value", ""), await self._active_draft(user)
+            )
+            return
+        raise ProfileCommandError("選択された目標操作を確認できませんでした。")
+
+    async def _handle_environment_postback(
+        self, user: str, operation: str, values: dict[str, str]
+    ) -> None:
+        if operation == "menu":
+            await self._show_environment_menu(user)
+            return
+        if operation == "add":
+            await self._messenger.send_quick_reply(
+                user,
+                "追加する種類を選んでください。",
+                [
+                    (
+                        "場所・種目",
+                        profile_action("environments", "group", value="activity_place"),
+                    ),
+                    (
+                        "器具",
+                        profile_action("environments", "group", value="equipment"),
+                    ),
+                    ("その他", profile_action("environments", "other")),
+                    ("キャンセル", profile_action("environments", "cancel")),
+                ],
+            )
+            return
+        if operation == "group":
+            group = values.get("value")
+            presets = (
+                sorted(ACTIVITY_PLACES if group == "activity_place" else EQUIPMENT)
+                if group in {"activity_place", "equipment"}
+                else []
+            )
+            if not presets:
+                raise ProfileCommandError("運動環境の種類を確認できませんでした。")
+            await self._drafts.delete(user)
+            await self.handle_text(user, "運動環境追加")
+            await self._messenger.send_quick_reply(
+                user,
+                "追加する項目を選んでください。",
+                [
+                    (name, profile_action("environments", "select", value=name))
+                    for name in presets
+                ]
+                + [("キャンセル", profile_action("environments", "cancel"))],
+            )
+            return
+        if operation == "other":
+            await self._drafts.delete(user)
+            await self.handle_text(user, "運動環境追加")
+            await self._messenger.send_text(
+                user, "その他の運動環境を入力してください。"
+            )
+            return
+        if operation in {"change", "deactivate"}:
+            await self._drafts.delete(user)
+            await self.handle_text(
+                user, "運動環境変更" if operation == "change" else "運動環境無効化"
+            )
+            resources = await self._resources.list(user)
+            if not resources:
+                await self._drafts.delete(user)
+                raise ProfileCommandError("変更できる運動環境がありません。")
+            await self._messenger.send_quick_reply(
+                user,
+                "対象の運動環境を選んでください。",
+                [
+                    (
+                        item.display_name[:20],
+                        profile_action("environments", "select", value=item.id),
+                    )
+                    for item in resources[:12]
+                ]
+                + [("キャンセル", profile_action("environments", "cancel"))],
+            )
+            return
+        if operation == "select":
+            await self._continue(
+                user, values.get("value", ""), await self._active_draft(user)
+            )
+            return
+        raise ProfileCommandError("選択された運動環境操作を確認できませんでした。")
+
+    async def _active_draft(self, user: str) -> ProfileDraft:
+        draft = await self._drafts.get(user)
+        if draft is None or draft.expires_at <= self._clock():
+            await self._drafts.delete(user)
+            raise ProfileCommandError(
+                "入力状態がありません。メニューからやり直してください。"
+            )
+        return draft
 
     async def handle_text(self, line_user_id: str, text: str) -> bool:
         value = text.strip()

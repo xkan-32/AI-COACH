@@ -10,6 +10,7 @@ client = TestClient(app)
 @pytest.mark.parametrize("target", sorted(MENU_MESSAGES))
 def test_line_event_worker_routes_every_rich_menu_action(target: str) -> None:
     runtime.messenger.texts.clear()
+    runtime.messenger.quick_replies.clear()
     response = client.post(
         "/tasks/line/events",
         json={
@@ -24,9 +25,16 @@ def test_line_event_worker_routes_every_rich_menu_action(target: str) -> None:
     assert response.status_code == 200
     if target == "goals":
         assert "目標" in runtime.messenger.texts[0][1]
-        assert "目標追加" in runtime.messenger.texts[-1][1]
+        assert [label for label, _ in runtime.messenger.quick_replies[-1][2]] == [
+            "追加",
+            "キャンセル",
+        ]
     elif target == "settings":
-        assert "運動環境" in runtime.messenger.texts[-1][1]
+        assert [label for label, _ in runtime.messenger.quick_replies[-1][2]] == [
+            "目標",
+            "運動環境",
+            "キャンセル",
+        ]
     else:
         assert runtime.messenger.texts == [("U-menu", MENU_MESSAGES[target])]
 

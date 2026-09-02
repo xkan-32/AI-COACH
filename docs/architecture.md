@@ -60,3 +60,4 @@ The model chooses within a bounded envelope. A deterministic policy can force re
 - 会話の最終保存IDにはdraftの操作IDを使う。同じCloud Taskが保存後に再送されても同じdocumentを上書きするため、追加が重複しない。
 - 未定義の運動環境は`other`と詳細へそのまま保持し、推測で既知区分へ分類しない。健康情報や入力本文をapplication logへ出さない。
 - リッチメニューの`goals`と`settings`は既存LINE worker内でPF-01 workflowを開始する。Webhookの署名検証、event予約、Cloud Tasks enqueue、即時200応答は変更しない。
+- PF-01の通常操作は`action=profile` postbackとQuick Replyを利用する。postbackには操作種別、安定ID、既知選択値だけを含め、自由記述や健康情報は含めない。テキストコマンドは後方互換経路として残す。

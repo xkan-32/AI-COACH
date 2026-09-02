@@ -120,6 +120,60 @@ async def test_conversation_add_change_deactivate_and_cancel() -> None:
     assert await drafts.get("line-1") is None
 
 
+async def test_rich_menu_uses_tappable_profile_actions() -> None:
+    goals, resources, drafts = (
+        InMemoryGoalStore(),
+        InMemoryTrainingResourceStore(),
+        InMemoryProfileDraftStore(),
+    )
+    messenger = InMemoryConditionPromptSender()
+    workflow = ProfileWorkflow(goals, resources, drafts, messenger)
+
+    assert await workflow.handle_postback(
+        "line-1", "action=menu&version=1&target=settings"
+    )
+    assert [label for label, _ in messenger.quick_replies[-1][2]] == [
+        "目標",
+        "運動環境",
+        "キャンセル",
+    ]
+
+    await workflow.handle_postback(
+        "line-1", "action=profile&section=environments&operation=menu"
+    )
+    add_action = messenger.quick_replies[-1][2][0][1]
+    await workflow.handle_postback("line-1", add_action)
+    place_action = messenger.quick_replies[-1][2][0][1]
+    await workflow.handle_postback("line-1", place_action)
+    indoor_action = next(
+        action
+        for label, action in messenger.quick_replies[-1][2]
+        if label == "インドアバイク"
+    )
+    await workflow.handle_postback("line-1", indoor_action)
+
+    assert [item.display_name for item in await resources.list("line-1")] == [
+        "インドアバイク"
+    ]
+    assert await drafts.get("line-1") is None
+
+
+async def test_goal_priority_can_be_selected_without_typing_command() -> None:
+    goals, resources, drafts = (
+        InMemoryGoalStore(),
+        InMemoryTrainingResourceStore(),
+        InMemoryProfileDraftStore(),
+    )
+    messenger = InMemoryConditionPromptSender()
+    workflow = ProfileWorkflow(goals, resources, drafts, messenger)
+    await workflow.handle_postback(
+        "line-1", "action=profile&section=goals&operation=add"
+    )
+    primary_action = messenger.quick_replies[-1][2][0][1]
+    await workflow.handle_postback("line-1", primary_action)
+    assert (await drafts.get("line-1")).step == "type"
+
+
 async def test_expired_draft_is_deleted() -> None:
     goals, resources, drafts = (
         InMemoryGoalStore(),
