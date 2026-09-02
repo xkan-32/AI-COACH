@@ -8,7 +8,16 @@ from app.domain.models import Activity
 
 
 class StravaApiError(RuntimeError):
-    pass
+    def __init__(
+        self,
+        message: str,
+        *,
+        status_code: int | None = None,
+        error_kind: str = "unknown",
+    ) -> None:
+        super().__init__(message)
+        self.status_code = status_code
+        self.error_kind = error_kind
 
 
 class StravaOAuthError(StravaApiError):
@@ -108,8 +117,20 @@ class StravaClient:
                 return StravaActivityResponse.model_validate(
                     response.json()
                 ).to_domain()
-        except (httpx.HTTPError, ValueError) as exc:
-            raise StravaApiError("Strava activity fetch failed") from exc
+        except httpx.HTTPStatusError as exc:
+            raise StravaApiError(
+                "Strava activity fetch failed",
+                status_code=exc.response.status_code,
+                error_kind="http_status",
+            ) from exc
+        except httpx.RequestError as exc:
+            raise StravaApiError(
+                "Strava activity fetch failed", error_kind="transport"
+            ) from exc
+        except ValueError as exc:
+            raise StravaApiError(
+                "Strava activity fetch failed", error_kind="invalid_response"
+            ) from exc
 
     async def update_description(
         self, activity_id: str, access_token: str, description: str
@@ -122,8 +143,16 @@ class StravaClient:
                     data={"description": description},
                 )
                 response.raise_for_status()
-        except httpx.HTTPError as exc:
-            raise StravaApiError("Strava Description update failed") from exc
+        except httpx.HTTPStatusError as exc:
+            raise StravaApiError(
+                "Strava Description update failed",
+                status_code=exc.response.status_code,
+                error_kind="http_status",
+            ) from exc
+        except httpx.RequestError as exc:
+            raise StravaApiError(
+                "Strava Description update failed", error_kind="transport"
+            ) from exc
 
     async def _token_request(self, values: dict[str, str], message: str) -> dict:
         try:
@@ -138,8 +167,16 @@ class StravaClient:
                 )
                 response.raise_for_status()
                 return response.json()
-        except (httpx.HTTPError, ValueError) as exc:
-            raise StravaOAuthError(message) from exc
+        except httpx.HTTPStatusError as exc:
+            raise StravaOAuthError(
+                message,
+                status_code=exc.response.status_code,
+                error_kind="http_status",
+            ) from exc
+        except httpx.RequestError as exc:
+            raise StravaOAuthError(message, error_kind="transport") from exc
+        except ValueError as exc:
+            raise StravaOAuthError(message, error_kind="invalid_response") from exc
 
 
 StravaOAuthClient = StravaClient

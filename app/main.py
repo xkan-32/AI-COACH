@@ -299,14 +299,27 @@ async def receive_strava_webhook(payload: dict) -> dict[str, str]:
     except ValidationError as exc:
         raise HTTPException(status_code=422, detail="Invalid Strava event") from exc
     if not await runtime.events.reserve("strava", event.event_key):
+        logger.info("strava_event_duplicate event_key=%s", event.event_key)
         return {"status": "duplicate"}
     if not event.is_new_activity:
+        logger.info(
+            "strava_event_ignored event_key=%s object_type=%s aspect_type=%s",
+            event.event_key,
+            event.object_type,
+            event.aspect_type,
+        )
         return {"status": "ignored"}
     try:
         await runtime.tasks.publish(event)
     except Exception:
         await runtime.events.release("strava", event.event_key)
         raise
+    logger.info(
+        "strava_activity_enqueued event_key=%s activity_id=%s athlete_id=%s",
+        event.event_key,
+        event.object_id,
+        event.owner_id,
+    )
     return {"status": "accepted"}
 
 
@@ -330,11 +343,33 @@ async def ingest_activity_task(
     try:
         activity = await service.ingest(str(event.object_id), str(event.owner_id))
     except UnknownAthleteToken as exc:
+        logger.warning(
+            "strava_activity_ingestion_failed event_key=%s activity_id=%s "
+            "athlete_id=%s error_kind=unlinked_athlete",
+            event.event_key,
+            event.object_id,
+            event.owner_id,
+        )
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except StravaApiError as exc:
+        logger.warning(
+            "strava_activity_ingestion_failed event_key=%s activity_id=%s "
+            "athlete_id=%s error_kind=%s strava_status_code=%s",
+            event.event_key,
+            event.object_id,
+            event.owner_id,
+            exc.error_kind,
+            exc.status_code if exc.status_code is not None else "unavailable",
+        )
         raise HTTPException(
             status_code=502, detail="Strava activity ingestion failed"
         ) from exc
+    logger.info(
+        "strava_activity_ingestion_completed event_key=%s activity_id=%s athlete_id=%s",
+        event.event_key,
+        event.object_id,
+        event.owner_id,
+    )
     return {"status": "completed", "activity_id": activity.id}
 
 
