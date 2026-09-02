@@ -14,6 +14,7 @@ from app.domain.models import (
     ConditionLevel,
     ConditionReport,
     RouteComparisonSummary,
+    WorkoutProposal,
 )
 from app.line import InMemoryConditionPromptSender
 
@@ -108,3 +109,22 @@ def test_coaching_input_contains_metrics_but_no_raw_location_data() -> None:
     assert "latlng" not in str(payload)
     assert "stream_points" not in str(payload)
     assert "route_hash" not in str(payload)
+
+
+def test_legacy_workout_proposal_has_nullable_planning_links() -> None:
+    proposal = WorkoutProposal.model_validate(
+        {
+            "id": "proposal-1",
+            "athlete_id": "athlete-1",
+            "source_activity_id": "activity-1",
+            "target_date": "2026-09-03",
+            "title": "休養",
+            "rationale": "回復",
+            "duration_minutes": 0,
+            "intensity": "rest",
+        }
+    )
+
+    assert proposal.plan_version_id is None
+    assert proposal.planned_workout_id is None
+    assert proposal.review_id is None

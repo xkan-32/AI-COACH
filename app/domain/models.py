@@ -212,6 +212,9 @@ class WorkoutProposal(BaseModel):
     id: str
     athlete_id: str
     source_activity_id: str
+    plan_version_id: str | None = None
+    planned_workout_id: str | None = None
+    review_id: str | None = None
     target_date: date
     title: str
     rationale: str
