@@ -72,6 +72,8 @@ Exit: only one approved proposal is appended, retries do not duplicate text.
 実装済み:
 
 - Webhook処理をCloud Tasksへ分離し、handlerは認証・正規化・enqueue後に即時応答
+- Strava Webhookへ`200 OK`を返し、Activity create再送を安定キーで重複排除
+- Cloud Run最小インスタンス0を維持し、startup CPU boostでコールドスタートを短縮
 - Cloud Tasksのretry設定とOIDC付きworker呼び出し
 - TerraformとGitHub ActionsによるCI/CD
 - LINEリッチメニューの冪等同期
