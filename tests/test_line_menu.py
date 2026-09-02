@@ -65,6 +65,21 @@ def test_definition_has_six_non_overlapping_areas_and_expected_actions() -> None
     ]
 
 
+async def test_manual_activity_callback_is_used_when_provided() -> None:
+    started: list[str] = []
+
+    async def on_start(line_user_id: str) -> None:
+        started.append(line_user_id)
+
+    messenger = InMemoryConditionPromptSender()
+    handled = await MenuActionRouter(
+        messenger, on_manual_activity_requested=on_start
+    ).handle("U123", "action=menu&version=1&target=manual_activity")
+    assert handled is True
+    assert started == ["U123"]
+    assert messenger.texts == []
+
+
 def test_png_dimensions_match_definition() -> None:
     definition = load_rich_menu_definition(CONFIG)
     png = definition.image_path.read_bytes()

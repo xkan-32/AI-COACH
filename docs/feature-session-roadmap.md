@@ -39,12 +39,15 @@ Strava Webhook -> Cloud Tasks -> Activity取得・保存
 - AC-01（Activity詳細、GPS非保存のLaps/Streams、versioned派生指標、直近履歴のAI context連携）
 - Planning Foundation（週間version、日次ID、実績照合・Review、公開下書き・専用承認domain）
 - AC-02（GPS非保存の250m区間負荷、HMAC route fingerprint、同一ルート比較）
+- PL-01B（手動shadow週間生成）
+- PL-01C（署名付き週間計画画面と初回承認）
+- MA-01（LINE手動Activity。Stravaは更新しない）
 
 未実装・拡張対象:
 
 - 状態別リッチメニュー（RM-05）
-- 手動Activity、体重
-- 長期・週間・日次計画
+- 体重
+- 実績照合以降の計画feedback loop（PL-01D〜F）
 - 7日/30日負荷、連続症状分析
 - 提案修正、進捗表示、通知設定
 - データ保持・削除、監視、DLQ、総合障害試験
@@ -57,8 +60,8 @@ Strava Webhook -> Cloud Tasks -> Activity取得・保存
 | 完了 | PF-01 | 目標・プロフィールUI | リッチメニュー |
 | 完了 | AC-01 | Activity/Laps/Streams | Strava取得 |
 | 完了 | AC-02 | 区間負荷・同一ルート比較 | AC-01 |
-| 1 | MA-01 | 手動Activity | Activityモデル、メニュー |
-| 2 | WT-01 | 体重記録 | メニュー、データ基盤 |
+| 完了 | MA-01 | 手動Activity | Activityモデル、メニュー |
+| 1 | WT-01 | 体重記録 | メニュー、データ基盤 |
 | 3 | PL-01 | 長期・週間・日次計画 | 目標、Activity、体重 |
 | 4 | AN-01 | 負荷・回復・症状分析 | 詳細履歴、計画 |
 | 5 | AI-01 | AI評価・提案拡張 | 分析、計画 |
@@ -116,10 +119,12 @@ PF-01の対象外:
 - route識別時だけworkerメモリ内で座標を処理し、HMAC化後は座標とcanonical点列を破棄する。
 - 同一routeの過去2件以上を基準にpace、心拍、cadence差分を作成し、安全なsummaryだけをAI contextへ渡す。
 
-### MA-01 LINE手動Activity
+### MA-01 LINE手動Activity（完了）
+
+実装記録は`docs/next-session-ma-01.md`を参照する。
 
 - 種別、日時、時間、強度、内容、commentを会話形式で登録する。
-- `planned/completed/replaced/skipped`を扱う。
+- `completed/partial/replaced/skipped`を扱う。
 - 入力途中保存、cancel、TTL、再開を実装する。
 - Strava Manual Activity作成は別の明示承認を必須にする。
 

@@ -27,6 +27,7 @@ from app.domain.models import (
 )
 from app.ingestion import ActivityIngestionService, UnknownAthleteToken
 from app.line_menu import MenuActionError, MenuActionRouter
+from app.manual_activity import InvalidManualActivityAction, ManualActivityWorkflow
 from app.oauth import InvalidOAuthState, OAuthStateSigner, strava_authorization_url
 from app.oauth_service import StravaOAuthService, UnknownOAuthSession
 from app.plan_approval import PlanApprovalError, PlanApprovalService
@@ -246,6 +247,28 @@ async def send_weekly_plan_link(line_user_id: str) -> None:
     await runtime.messenger.send_weekly_plan_link(
         line_user_id, await create_weekly_plan_url(line_user_id)
     )
+
+
+def _manual_activity_workflow() -> ManualActivityWorkflow:
+    return ManualActivityWorkflow(
+        runtime.manual_activity_drafts,
+        runtime.activities,
+        runtime.activity_contexts,
+        runtime.messenger,
+        settings=runtime.training_settings_state,
+        environments=runtime.training_resources,
+        planning_history=runtime.planning_history,
+        active_plans=runtime.active_plan_pointers,
+        on_completed=_send_manual_activity_condition_prompt,
+    )
+
+
+async def start_manual_activity(line_user_id: str) -> None:
+    await _manual_activity_workflow().start(line_user_id)
+
+
+async def _send_manual_activity_condition_prompt(activity, line_user_id: str) -> None:
+    await runtime.condition_prompts.send(line_user_id, activity)
 
 
 async def create_strava_authorization_url(line_user_id: str) -> str:
@@ -801,13 +824,18 @@ async def process_line_event(event: dict) -> None:
         on_settings_requested=send_profile_settings_link,
     )
     menu_actions = MenuActionRouter(
-        runtime.messenger, on_progress_requested=send_weekly_plan_link
+        runtime.messenger,
+        on_progress_requested=send_weekly_plan_link,
+        on_manual_activity_requested=start_manual_activity,
     )
+    manual_workflow = _manual_activity_workflow()
     event_type = event.get("type")
     line_user_id = event.get("source", {}).get("userId", "")
     try:
         if event_type == "postback":
             data = event.get("postback", {}).get("data", "")
+            if await manual_workflow.handle_postback(line_user_id, data):
+                return
             if await profile_workflow.handle_postback(line_user_id, data):
                 return
             if await menu_actions.handle(line_user_id, data):
@@ -852,6 +880,8 @@ async def process_line_event(event: dict) -> None:
                 f"{authorization_url}",
             )
             return
+        if await manual_workflow.handle_text(line_user_id, text):
+            return
         if await profile_workflow.handle_text(line_user_id, text):
             return
         await workflow.handle_text(line_user_id, text)
@@ -862,6 +892,7 @@ async def process_line_event(event: dict) -> None:
         )
     except (
         InvalidConditionAction,
+        InvalidManualActivityAction,
         MenuActionError,
         PlanApprovalError,
         ProfileCommandError,

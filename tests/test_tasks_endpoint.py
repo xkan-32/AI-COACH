@@ -16,6 +16,7 @@ def test_line_event_worker_routes_every_rich_menu_action(target: str) -> None:
     runtime.messenger.quick_replies.clear()
     runtime.messenger.settings_links.clear()
     runtime.messenger.weekly_plan_links.clear()
+    runtime.manual_activity_drafts.items.clear()
     response = client.post(
         "/tasks/line/events",
         json={
@@ -41,6 +42,9 @@ def test_line_event_worker_routes_every_rich_menu_action(target: str) -> None:
         assert runtime.messenger.texts == [
             ("U-menu", "確認できる週間計画はまだありません。")
         ]
+    elif target == "manual_activity":
+        assert runtime.messenger.quick_replies
+        assert "種目" in runtime.messenger.quick_replies[0][1]
     else:
         assert runtime.messenger.texts == [("U-menu", MENU_MESSAGES[target])]
 

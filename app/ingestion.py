@@ -13,7 +13,7 @@ from app.activity_data import (
 )
 from app.activity_metrics import compute_activity_metrics
 from app.condition import ActivityContext, ActivityContextStore
-from app.domain.models import Activity
+from app.domain.models import Activity, ActivitySource
 from app.segment_analysis import (
     RouteFingerprintHasher,
     compare_route_segments,
@@ -280,6 +280,14 @@ class BigQueryActivityStore:
             "average_cadence_per_minute": activity.average_cadence_per_minute,
             "suffer_score": activity.suffer_score,
             "calories": activity.calories,
+            "user_id": activity.user_id,
+            "source_type": activity.source_type.value,
+            "source_activity_id": activity.source_activity_id or activity.id,
+            "planned_workout_id": activity.planned_workout_id,
+            "perceived_intensity": activity.perceived_intensity,
+            "environment_ids": list(activity.environment_ids),
+            "completion_status": activity.completion_status,
+            "details": activity.details,
         }
         errors = await asyncio.to_thread(
             self._client.insert_rows_json,
@@ -343,4 +351,12 @@ def _activity_from_row(row) -> Activity:
         average_cadence_per_minute=values.get("average_cadence_per_minute"),
         suffer_score=values.get("suffer_score"),
         calories=values.get("calories"),
+        user_id=values.get("user_id"),
+        source_type=ActivitySource(values.get("source_type") or ActivitySource.STRAVA),
+        source_activity_id=values.get("source_activity_id"),
+        planned_workout_id=values.get("planned_workout_id"),
+        perceived_intensity=values.get("perceived_intensity"),
+        environment_ids=list(values.get("environment_ids") or []),
+        completion_status=values.get("completion_status"),
+        details=values.get("details") or "",
     )

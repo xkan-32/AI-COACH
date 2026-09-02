@@ -56,6 +56,11 @@ class TrainingEnvironment(BaseModel):
     detail: str | None = Field(default=None, max_length=200)
 
 
+class ActivitySource(StrEnum):
+    STRAVA = "strava"
+    LINE_MANUAL = "line_manual"
+
+
 class Activity(BaseModel):
     id: str
     athlete_id: str
@@ -74,6 +79,14 @@ class Activity(BaseModel):
     average_cadence_per_minute: float | None = Field(default=None, ge=0)
     suffer_score: float | None = Field(default=None, ge=0)
     calories: float | None = Field(default=None, ge=0)
+    user_id: str | None = None
+    source_type: ActivitySource = ActivitySource.STRAVA
+    source_activity_id: str | None = None
+    planned_workout_id: str | None = None
+    perceived_intensity: str | None = None
+    environment_ids: list[str] = Field(default_factory=list)
+    completion_status: str | None = None
+    details: str = ""
 
 
 class ActivityLap(BaseModel):

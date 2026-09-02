@@ -16,7 +16,15 @@ CREATE TABLE IF NOT EXISTS `training_coach.activities` (
   average_cadence_per_minute FLOAT64,
   suffer_score FLOAT64,
   calories FLOAT64,
-  ingested_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP()
+  ingested_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP(),
+  user_id STRING,
+  source_type STRING,
+  source_activity_id STRING,
+  planned_workout_id STRING,
+  perceived_intensity STRING,
+  environment_ids ARRAY<STRING>,
+  completion_status STRING,
+  details STRING
 )
 PARTITION BY DATE(started_at)
 CLUSTER BY athlete_id, activity_type;

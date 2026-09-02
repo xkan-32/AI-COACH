@@ -1158,11 +1158,13 @@ class ProfileWorkflow:
 
     async def handle_text(self, line_user_id: str, text: str) -> bool:
         value = text.strip()
+        draft = await self._drafts.get(line_user_id)
         if value.lower() in {"cancel", "キャンセル"}:
+            if draft is None:
+                return False
             await self._drafts.delete(line_user_id)
             await self._messenger.send_text(line_user_id, "入力をキャンセルしました。")
             return True
-        draft = await self._drafts.get(line_user_id)
         if draft:
             if draft.expires_at <= self._clock():
                 await self._drafts.delete(line_user_id)

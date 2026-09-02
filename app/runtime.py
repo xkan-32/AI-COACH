@@ -60,6 +60,11 @@ from app.ingestion import (
     InMemoryActivityStore,
 )
 from app.line import InMemoryConditionPromptSender, LineConditionPromptSender
+from app.manual_activity import (
+    FirestoreManualActivityDraftStore,
+    InMemoryManualActivityDraftStore,
+    ManualActivityDraftStore,
+)
 from app.plan_approval import (
     FirestorePlanApprovalStateStore,
     InMemoryPlanApprovalStateStore,
@@ -162,6 +167,7 @@ class Runtime:
     activity_contexts: ActivityContextStore
     condition_prompts: ConditionPromptSender
     condition_drafts: ConditionDraftStore
+    manual_activity_drafts: ManualActivityDraftStore
     condition_reports: ConditionReportStore
     messenger: FollowUpMessenger
     coach: CoachGenerator
@@ -218,6 +224,7 @@ def build_runtime(settings: Settings) -> Runtime:
             activity_contexts=InMemoryActivityContextStore(),
             condition_prompts=line,
             condition_drafts=InMemoryConditionDraftStore(),
+            manual_activity_drafts=InMemoryManualActivityDraftStore(),
             condition_reports=InMemoryConditionReportStore(),
             messenger=line,
             coach=LocalCoachGenerator(),
@@ -321,6 +328,7 @@ def build_runtime(settings: Settings) -> Runtime:
         activity_contexts=FirestoreActivityContextStore(firestore_client),
         condition_prompts=line,
         condition_drafts=FirestoreConditionDraftStore(firestore_client),
+        manual_activity_drafts=FirestoreManualActivityDraftStore(firestore_client),
         condition_reports=BigQueryConditionReportStore(
             bigquery_client, f"{table_prefix}.condition_reports"
         ),

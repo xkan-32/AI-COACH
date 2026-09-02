@@ -32,7 +32,7 @@ StravaのPOST WebhookはCloud Tasksへのenqueue後、2秒以内に`200 OK`を�
 
 - `users`: athlete identity, LINE link, timezone, consent status
 - `strava_tokens`: AES-256-GCM encrypted access/refresh tokens and rotation metadata in Firestore
-- `activities`: immutable Strava activity snapshots
+- `activities`: immutable activity snapshots from Strava or LINE manual registration
 - `activity_laps`: normalized lap summaries keyed by activity and lap index
 - `activity_stream_points`: GPS-free time-series points for time, distance, altitude, speed, heart rate, cadence, watts, temperature, movement, and grade
 - `activity_metrics`: versioned, reproducible per-activity metrics and data-quality reasons
@@ -52,6 +52,7 @@ StravaのPOST WebhookはCloud Tasksへのenqueue後、2秒以内に`200 OK`を�
 - `audit_events`: approval and Strava mutation evidence
 - `oauth_sessions`: OAuth state nonce, LINE user ID, and `expires_at` with Firestore TTL
 - `condition_drafts`: in-progress condition response and `expires_at` with Firestore TTL
+- `manual_activity_drafts`: in-progress LINE manual activity input and `expires_at` with Firestore TTL
 - `activity_contexts`: activity-to-LINE-user context and `expires_at` with Firestore TTL
 
 BigQuery is used for immutable history and analysis. Firestore is used for OAuth token rotation, webhook idempotency locks, conversation state, and approval state transitions; BigQuery alone is not suitable for these mutable workflows.
@@ -62,7 +63,7 @@ BigQuery is used for immutable history and analysis. Firestore is used for OAuth
 
 - 週間計画は上書きせず、週・athlete・versionから決定的に識別する。Firestoreには週ごとのactive pointerだけを置き、全versionとAI入力snapshotはBigQueryへappend-onlyで保存する。
 - 日次メニューは計画version、日付、sequenceから決定的に識別する。既存の`WorkoutProposal`はnullableな計画FKを持ち、未計画の日次提案も後方互換で扱う。
-- 実績照合はStravaと将来のmanual activityを同じ境界で扱い、matcher versionと客観的な差分を保持する。
+- 実績照合はStravaと手動Activityを同じ境界で扱い、matcher versionと客観的な差分を保持する。
 - Reviewは客観要因、体調、対話由来要因を分離し、次計画向けfeedback codeとAI／rule versionを残す。週間shadow生成は接続済みで、自動照合と未達理由対話は後続機能で接続する。
 
 ## 外部公開承認境界
@@ -97,6 +98,13 @@ BigQuery is used for immutable history and analysis. Firestore is used for OAuth
 - 承認、却下、別案依頼にはsessionに加え、decisionを束縛した期限付きHMAC tokenを要求する。
 - Firestoreの承認stateは週開始日とversionを含むpending pointerをCAS更新し、古い週・旧version・二重操作を拒否する。
 - `TrainingPlanVersion`の作成時statusは不変のまま保持し、有効状態はlifecycle eventを正本とする。承認時だけ既存rowを再保存せずactive pointerを切り替える。
+
+## MA-01 LINE手動Activity
+
+- リッチメニューの「運動を記録」から会話を開始し、種目・日時・時間・主観強度・完了状態・任意の計画メニューと運動環境を登録する。
+- 保存先は共通`Activity`境界。`source_type=line_manual`、`user_id`、決定的な`source_activity_id`を持ち、心拍や消費カロリーは推測しない。
+- Firestore draftは24時間TTL。同じ`operation_id`の再送は同一Activity IDへ収束し、内容が変わった場合だけ拒否する。
+- 保存後は既存の体調確認へ接続する。Strava Manual Activity作成と実績照合は後続機能へ残す。
 
 ## AC-01 詳細Activity・負荷解析
 
