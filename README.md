@@ -15,6 +15,7 @@ Stravaのアクティビティ取得を起点に、LINEで体調を確認し、V
 詳細は [docs/implementation-plan.md](docs/implementation-plan.md) と [docs/architecture.md](docs/architecture.md) を参照してください。 初回GCP/WIF/GitHub Actions構築は [docs/bootstrap-and-cicd.md](docs/bootstrap-and-cicd.md) に手順があります。
 
 LINEリッチメニューの現在地と実装計画は [docs/rich-menu-plan.md](docs/rich-menu-plan.md)、機能別Codexセッションの実装順・完了条件・引き継ぎテンプレートは [docs/feature-session-roadmap.md](docs/feature-session-roadmap.md) を参照してください。
+次の推奨セッションであるPF-01の確定事項と実行用プロンプトは [docs/next-session-pf-01.md](docs/next-session-pf-01.md) にまとめています。
 
 ## ローカル起動
 
