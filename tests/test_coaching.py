@@ -4,9 +4,16 @@ from app.coaching import (
     CoachingService,
     CoachOutput,
     InMemoryProposalStore,
+    build_coaching_input,
     enforce_safety,
 )
-from app.domain.models import Activity, ConditionLevel, ConditionReport
+from app.domain.models import (
+    Activity,
+    ActivityMetrics,
+    CoachingContext,
+    ConditionLevel,
+    ConditionReport,
+)
 from app.line import InMemoryConditionPromptSender
 
 
@@ -68,3 +75,25 @@ async def test_coaching_service_saves_then_sends_safe_proposal() -> None:
     assert proposal.duration_minutes == 0
     assert proposals.items[proposal.id] == proposal
     assert sender.proposals == [("line-user", proposal)]
+
+
+def test_coaching_input_contains_metrics_but_no_raw_location_data() -> None:
+    context = CoachingContext(
+        recent_activities=[activity()],
+        current_activity_metrics=ActivityMetrics(
+            activity_id="activity-1",
+            athlete_id="athlete-1",
+            computation_version="v1",
+            metric_quality="partial_streams",
+            average_pace_seconds_per_km=360,
+            ascent_meters=120,
+        ),
+    )
+
+    payload = build_coaching_input(activity(), report(ConditionLevel.GOOD), context)
+
+    assert (
+        payload["coaching_context"]["current_activity_metrics"]["ascent_meters"] == 120
+    )
+    assert "latlng" not in str(payload)
+    assert "stream_points" not in str(payload)

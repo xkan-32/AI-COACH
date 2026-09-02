@@ -33,6 +33,9 @@ StravaのPOST WebhookはCloud Tasksへのenqueue後、2秒以内に`200 OK`を�
 - `users`: athlete identity, LINE link, timezone, consent status
 - `strava_tokens`: AES-256-GCM encrypted access/refresh tokens and rotation metadata in Firestore
 - `activities`: immutable Strava activity snapshots
+- `activity_laps`: normalized lap summaries keyed by activity and lap index
+- `activity_stream_points`: GPS-free time-series points for time, distance, altitude, speed, heart rate, cadence, watts, temperature, movement, and grade
+- `activity_metrics`: versioned, reproducible per-activity metrics and data-quality reasons
 - `condition_reports`: subjective condition and optional symptom detail
 - `goals`: primary/secondary goal, target, date, status
 - `equipment`: available exercise methods and constraints
@@ -44,6 +47,18 @@ StravaのPOST WebhookはCloud Tasksへのenqueue後、2秒以内に`200 OK`を�
 - `activity_contexts`: activity-to-LINE-user context and `expires_at` with Firestore TTL
 
 BigQuery is used for immutable history and analysis. Firestore is used for OAuth token rotation, webhook idempotency locks, conversation state, and approval state transitions; BigQuery alone is not suitable for these mutable workflows.
+
+## AC-01 詳細Activity・負荷解析
+
+- Run、Walk、Ride系Activityではdetail、laps、streamsをCloud Tasks worker内で取得する。非対応種目はActivity summaryから安全に処理する。
+- GPS座標（`latlng`）は要求・永続化・ログ出力・Vertex AI送信を行わない。高度や勾配の解析には`distance`、`altitude`、`grade_smooth`を使用する。
+- GPS以外のstream pointをBigQueryへ不変履歴として保存し、派生指標は`computation_version`付きで別テーブルへ保存する。
+- 平均ペース、上昇・下降量、勾配帯別時間・距離、ペース／lap変動、心拍drift、cadence等を決定論的に算出する。欠損センサーを推測で補わず、`metric_quality`と理由を保持する。
+- Run／Walk系のStrava cadenceは片足周期として返る値を2倍し、1分あたりの歩数へ正規化する。Ride系は回転数のまま保持する。
+- Lapsとstream pointsはActivity開始日でpartitionし、安定row IDとFirestoreのstage状態でTask再送時の重複書き込みを抑止する。
+- LINE体調確認にはActivity ID由来の安定した`X-Line-Retry-Key`を付け、送信成功後にprompt stageを完了する。
+- Vertex AIへ渡すのはActivity summary、派生指標、直近Activity・Condition履歴だけであり、生streamは渡さない。
+- 最大心拍等の本人設定がない状態では心拍zoneを推定しない。7日／30日負荷や負荷急増flagはAN-01で実装する。
 
 ## Safety boundary
 

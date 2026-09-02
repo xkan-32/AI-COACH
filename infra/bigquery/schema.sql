@@ -6,10 +6,85 @@ CREATE TABLE IF NOT EXISTS `training_coach.activities` (
   duration_seconds INT64,
   distance_meters FLOAT64,
   description STRING,
+  elapsed_seconds INT64,
+  total_elevation_gain_meters FLOAT64,
+  average_speed_mps FLOAT64,
+  max_speed_mps FLOAT64,
+  has_heartrate BOOL,
+  average_heartrate_bpm FLOAT64,
+  max_heartrate_bpm FLOAT64,
+  average_cadence_per_minute FLOAT64,
+  suffer_score FLOAT64,
+  calories FLOAT64,
   ingested_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP()
 )
 PARTITION BY DATE(started_at)
 CLUSTER BY athlete_id, activity_type;
+
+CREATE TABLE IF NOT EXISTS `training_coach.activity_laps` (
+  activity_id STRING NOT NULL,
+  athlete_id STRING NOT NULL,
+  activity_started_at TIMESTAMP NOT NULL,
+  lap_index INT64 NOT NULL,
+  name STRING,
+  elapsed_seconds INT64,
+  moving_seconds INT64,
+  distance_meters FLOAT64,
+  total_elevation_gain_meters FLOAT64,
+  average_speed_mps FLOAT64,
+  max_speed_mps FLOAT64,
+  average_heartrate_bpm FLOAT64,
+  max_heartrate_bpm FLOAT64,
+  average_cadence_per_minute FLOAT64
+)
+PARTITION BY DATE(activity_started_at)
+CLUSTER BY athlete_id, activity_id;
+
+CREATE TABLE IF NOT EXISTS `training_coach.activity_stream_points` (
+  activity_id STRING NOT NULL,
+  athlete_id STRING NOT NULL,
+  activity_started_at TIMESTAMP NOT NULL,
+  sample_index INT64 NOT NULL,
+  time_seconds INT64,
+  distance_meters FLOAT64,
+  altitude_meters FLOAT64,
+  velocity_mps FLOAT64,
+  heartrate_bpm FLOAT64,
+  cadence_rpm FLOAT64,
+  watts FLOAT64,
+  temperature_celsius FLOAT64,
+  moving BOOL,
+  grade_percent FLOAT64
+)
+PARTITION BY DATE(activity_started_at)
+CLUSTER BY athlete_id, activity_id;
+
+CREATE TABLE IF NOT EXISTS `training_coach.activity_metrics` (
+  activity_id STRING NOT NULL,
+  athlete_id STRING NOT NULL,
+  computation_version STRING NOT NULL,
+  metric_quality STRING NOT NULL,
+  quality_reasons ARRAY<STRING>,
+  average_pace_seconds_per_km FLOAT64,
+  ascent_meters FLOAT64,
+  descent_meters FLOAT64,
+  uphill_seconds INT64,
+  flat_seconds INT64,
+  downhill_seconds INT64,
+  uphill_meters FLOAT64,
+  flat_meters FLOAT64,
+  downhill_meters FLOAT64,
+  pace_variability_percent FLOAT64,
+  lap_pace_variability_percent FLOAT64,
+  average_heartrate_bpm FLOAT64,
+  max_heartrate_bpm FLOAT64,
+  heartrate_drift_percent FLOAT64,
+  average_cadence_per_minute FLOAT64,
+  suffer_score FLOAT64,
+  computed_at TIMESTAMP NOT NULL
+)
+PARTITION BY DATE(computed_at)
+CLUSTER BY athlete_id, metric_quality;
 
 CREATE TABLE IF NOT EXISTS `training_coach.condition_reports` (
   athlete_id STRING NOT NULL,

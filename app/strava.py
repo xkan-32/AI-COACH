@@ -4,7 +4,24 @@ from datetime import datetime
 import httpx
 from pydantic import BaseModel, Field
 
-from app.domain.models import Activity
+from app.domain.models import (
+    Activity,
+    ActivityLap,
+    ActivityStreamPoint,
+)
+
+ACTIVITY_STREAM_KEYS = (
+    "time",
+    "distance",
+    "altitude",
+    "velocity_smooth",
+    "heartrate",
+    "cadence",
+    "watts",
+    "temp",
+    "moving",
+    "grade_smooth",
+)
 
 
 class StravaApiError(RuntimeError):
@@ -53,6 +70,16 @@ class StravaActivityResponse(BaseModel):
     moving_time: int = Field(ge=0)
     distance: float = Field(ge=0)
     description: str | None = None
+    elapsed_time: int | None = Field(default=None, ge=0)
+    total_elevation_gain: float | None = Field(default=None, ge=0)
+    average_speed: float | None = Field(default=None, ge=0)
+    max_speed: float | None = Field(default=None, ge=0)
+    has_heartrate: bool = False
+    average_heartrate: float | None = Field(default=None, ge=0)
+    max_heartrate: float | None = Field(default=None, ge=0)
+    average_cadence: float | None = Field(default=None, ge=0)
+    suffer_score: float | None = Field(default=None, ge=0)
+    calories: float | None = Field(default=None, ge=0)
 
     def to_domain(self) -> Activity:
         return Activity(
@@ -63,6 +90,56 @@ class StravaActivityResponse(BaseModel):
             duration_seconds=self.moving_time,
             distance_meters=self.distance,
             description=self.description or "",
+            elapsed_seconds=self.elapsed_time,
+            total_elevation_gain_meters=self.total_elevation_gain,
+            average_speed_mps=self.average_speed,
+            max_speed_mps=self.max_speed,
+            has_heartrate=self.has_heartrate,
+            average_heartrate_bpm=self.average_heartrate,
+            max_heartrate_bpm=self.max_heartrate,
+            average_cadence_per_minute=_cadence_per_minute(
+                self.sport_type, self.average_cadence
+            ),
+            suffer_score=self.suffer_score,
+            calories=self.calories,
+        )
+
+
+class StravaLapResponse(BaseModel):
+    name: str | None = None
+    elapsed_time: int = Field(ge=0)
+    moving_time: int = Field(ge=0)
+    distance: float = Field(ge=0)
+    total_elevation_gain: float | None = Field(default=None, ge=0)
+    average_speed: float | None = Field(default=None, ge=0)
+    max_speed: float | None = Field(default=None, ge=0)
+    average_heartrate: float | None = Field(default=None, ge=0)
+    max_heartrate: float | None = Field(default=None, ge=0)
+    average_cadence: float | None = Field(default=None, ge=0)
+
+    def to_domain(
+        self,
+        activity_id: str,
+        athlete_id: str,
+        activity_type: str,
+        lap_index: int,
+    ) -> ActivityLap:
+        return ActivityLap(
+            activity_id=activity_id,
+            athlete_id=athlete_id,
+            lap_index=lap_index,
+            name=self.name or "",
+            elapsed_seconds=self.elapsed_time,
+            moving_seconds=self.moving_time,
+            distance_meters=self.distance,
+            total_elevation_gain_meters=self.total_elevation_gain,
+            average_speed_mps=self.average_speed,
+            max_speed_mps=self.max_speed,
+            average_heartrate_bpm=self.average_heartrate,
+            max_heartrate_bpm=self.max_heartrate,
+            average_cadence_per_minute=_cadence_per_minute(
+                activity_type, self.average_cadence
+            ),
         )
 
 
@@ -132,6 +209,74 @@ class StravaClient:
                 "Strava activity fetch failed", error_kind="invalid_response"
             ) from exc
 
+    async def get_activity_laps(
+        self,
+        activity_id: str,
+        athlete_id: str,
+        activity_type: str,
+        access_token: str,
+    ) -> list[ActivityLap]:
+        try:
+            async with httpx.AsyncClient(timeout=self._timeout) as client:
+                response = await client.get(
+                    f"{self.api_base_url}/activities/{activity_id}/laps",
+                    headers={"Authorization": f"Bearer {access_token}"},
+                )
+                response.raise_for_status()
+                values = response.json()
+                if not isinstance(values, list):
+                    raise TypeError("Expected a list of laps")
+                return [
+                    StravaLapResponse.model_validate(value).to_domain(
+                        activity_id, athlete_id, activity_type, index
+                    )
+                    for index, value in enumerate(values)
+                ]
+        except httpx.HTTPStatusError as exc:
+            raise StravaApiError(
+                "Strava activity laps fetch failed",
+                status_code=exc.response.status_code,
+                error_kind="http_status",
+            ) from exc
+        except httpx.RequestError as exc:
+            raise StravaApiError(
+                "Strava activity laps fetch failed", error_kind="transport"
+            ) from exc
+        except (TypeError, ValueError) as exc:
+            raise StravaApiError(
+                "Strava activity laps fetch failed", error_kind="invalid_response"
+            ) from exc
+
+    async def get_activity_streams(
+        self, activity_id: str, athlete_id: str, access_token: str
+    ) -> list[ActivityStreamPoint]:
+        try:
+            async with httpx.AsyncClient(timeout=self._timeout) as client:
+                response = await client.get(
+                    f"{self.api_base_url}/activities/{activity_id}/streams",
+                    headers={"Authorization": f"Bearer {access_token}"},
+                    params={
+                        "keys": ",".join(ACTIVITY_STREAM_KEYS),
+                        "key_by_type": "true",
+                    },
+                )
+                response.raise_for_status()
+                return _stream_points(activity_id, athlete_id, response.json())
+        except httpx.HTTPStatusError as exc:
+            raise StravaApiError(
+                "Strava activity streams fetch failed",
+                status_code=exc.response.status_code,
+                error_kind="http_status",
+            ) from exc
+        except httpx.RequestError as exc:
+            raise StravaApiError(
+                "Strava activity streams fetch failed", error_kind="transport"
+            ) from exc
+        except (TypeError, ValueError) as exc:
+            raise StravaApiError(
+                "Strava activity streams fetch failed", error_kind="invalid_response"
+            ) from exc
+
     async def update_description(
         self, activity_id: str, access_token: str, description: str
     ) -> None:
@@ -177,6 +322,53 @@ class StravaClient:
             raise StravaOAuthError(message, error_kind="transport") from exc
         except ValueError as exc:
             raise StravaOAuthError(message, error_kind="invalid_response") from exc
+
+
+def _stream_points(
+    activity_id: str, athlete_id: str, payload: object
+) -> list[ActivityStreamPoint]:
+    if not isinstance(payload, dict):
+        raise TypeError("Expected keyed stream response")
+    streams: dict[str, list[object]] = {}
+    for key in ACTIVITY_STREAM_KEYS:
+        value = payload.get(key)
+        if value is None:
+            continue
+        if not isinstance(value, dict) or not isinstance(value.get("data"), list):
+            raise TypeError(f"Invalid {key} stream")
+        streams[key] = value["data"]
+    size = max((len(values) for values in streams.values()), default=0)
+
+    def at(key: str, index: int):
+        values = streams.get(key, [])
+        return values[index] if index < len(values) else None
+
+    return [
+        ActivityStreamPoint(
+            activity_id=activity_id,
+            athlete_id=athlete_id,
+            sample_index=index,
+            time_seconds=at("time", index),
+            distance_meters=at("distance", index),
+            altitude_meters=at("altitude", index),
+            velocity_mps=at("velocity_smooth", index),
+            heartrate_bpm=at("heartrate", index),
+            cadence_rpm=at("cadence", index),
+            watts=at("watts", index),
+            temperature_celsius=at("temp", index),
+            moving=at("moving", index),
+            grade_percent=at("grade_smooth", index),
+        )
+        for index in range(size)
+    ]
+
+
+def _cadence_per_minute(activity_type: str, raw_cadence: float | None) -> float | None:
+    if raw_cadence is None:
+        return None
+    if activity_type in {"Run", "TrailRun", "VirtualRun", "Walk", "Hike"}:
+        return raw_cadence * 2
+    return raw_cadence
 
 
 StravaOAuthClient = StravaClient

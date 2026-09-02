@@ -53,13 +53,7 @@ class VertexCoachGenerator:
 
         constraints = hard_safety_constraints(report)
         contents = json.dumps(
-            {
-                "activity": activity.model_dump(mode="json"),
-                "condition": report.model_dump(mode="json"),
-                "coaching_context": context.model_dump(mode="json"),
-                "mandatory_constraints": constraints,
-                "task": "Propose one conservative workout for the next day in Japanese.",
-            },
+            build_coaching_input(activity, report, context, constraints),
             ensure_ascii=False,
         )
         response = await self._client.aio.models.generate_content(
@@ -78,6 +72,21 @@ class VertexCoachGenerator:
         if response.parsed is not None:
             return CoachOutput.model_validate(response.parsed)
         return CoachOutput.model_validate_json(response.text)
+
+
+def build_coaching_input(
+    activity: Activity,
+    report: ConditionReport,
+    context: CoachingContext,
+    constraints: list[str] | None = None,
+) -> dict:
+    return {
+        "activity": activity.model_dump(mode="json"),
+        "condition": report.model_dump(mode="json"),
+        "coaching_context": context.model_dump(mode="json"),
+        "mandatory_constraints": constraints or hard_safety_constraints(report),
+        "task": "Propose one conservative workout for the next day in Japanese.",
+    }
 
 
 class LocalCoachGenerator:
