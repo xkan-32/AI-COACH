@@ -259,6 +259,78 @@ def test_settings_page_requires_one_time_link_and_saves_multiple_items() -> None
         "ダンベル",
     }
     assert current["revision"] == 1
+    assert current["target_weight_kg"] is None
+
+
+def test_settings_api_saves_and_clears_target_weight() -> None:
+    from app.main import app, runtime
+
+    client = TestClient(app)
+    runtime.messenger.settings_links.clear()
+    response = client.post(
+        "/tasks/line/events",
+        json={
+            "event_key": "web-settings-target-weight",
+            "event": {
+                "type": "postback",
+                "source": {"userId": "U-web-weight"},
+                "postback": {"data": "action=menu&version=1&target=settings"},
+            },
+        },
+    )
+    assert response.status_code == 200
+    assert client.get(runtime.messenger.settings_links[-1][1]).status_code == 200
+
+    saved = client.put(
+        "/settings/profile/api",
+        json={
+            "expected_revision": 0,
+            "operation_id": "web-settings-weight-1",
+            "goals": [],
+            "training_environments": [],
+            "target_weight_kg": 68.24,
+        },
+    )
+    assert saved.status_code == 200
+    current = client.get("/settings/profile/api").json()
+    assert current["target_weight_kg"] == 68.2
+
+    omitted = client.put(
+        "/settings/profile/api",
+        json={
+            "expected_revision": current["revision"],
+            "operation_id": "web-settings-weight-2",
+            "goals": [],
+            "training_environments": [],
+        },
+    )
+    assert omitted.status_code == 200
+    assert client.get("/settings/profile/api").json()["target_weight_kg"] == 68.2
+
+    cleared = client.put(
+        "/settings/profile/api",
+        json={
+            "expected_revision": omitted.json()["revision"],
+            "operation_id": "web-settings-weight-3",
+            "goals": [],
+            "training_environments": [],
+            "target_weight_kg": None,
+        },
+    )
+    assert cleared.status_code == 200
+    assert client.get("/settings/profile/api").json()["target_weight_kg"] is None
+
+    rejected = client.put(
+        "/settings/profile/api",
+        json={
+            "expected_revision": cleared.json()["revision"],
+            "operation_id": "web-settings-weight-4",
+            "goals": [],
+            "training_environments": [],
+            "target_weight_kg": 20,
+        },
+    )
+    assert rejected.status_code == 422
 
 
 def test_settings_api_normalizes_alias_preserves_other_detail_and_is_idempotent() -> (
@@ -340,6 +412,9 @@ def test_settings_page_has_mobile_goal_controls() -> None:
     assert "＋ 主目標を登録" in page
     assert "＋ 副目標を追加" in page
     assert "主目標に設定" in page
+    assert 'id="target-weight"' in page
+    assert "目標体重" in page
+    assert "target_weight_kg" in page
     assert "input:not([type=radio]):not([type=checkbox])" in page
     assert "input[type=date]{min-height:46px" in page
     assert "font-size:16px" in page

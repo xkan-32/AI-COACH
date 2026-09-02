@@ -6,7 +6,10 @@ import pytest
 
 from app.line import InMemoryConditionPromptSender
 from app.line_menu import (
+    CONDITION_ACTIVITY_POSTBACK,
+    CONDITION_HUB_PROMPT,
     MENU_MESSAGES,
+    WEIGHT_START_POSTBACK,
     MenuActionError,
     MenuActionRouter,
     RichMenuDefinitionError,
@@ -17,7 +20,9 @@ ROOT = Path(__file__).resolve().parents[1]
 CONFIG = ROOT / "config/line-rich-menu/rich-menu-v1.json"
 
 
-@pytest.mark.parametrize("target", sorted(MENU_MESSAGES))
+@pytest.mark.parametrize(
+    "target", sorted(item for item in MENU_MESSAGES if item != "condition")
+)
 async def test_every_menu_action_responds(target: str) -> None:
     messenger = InMemoryConditionPromptSender()
     handled = await MenuActionRouter(messenger).handle(
@@ -25,6 +30,28 @@ async def test_every_menu_action_responds(target: str) -> None:
     )
     assert handled is True
     assert messenger.texts == [("U123", MENU_MESSAGES[target])]
+
+
+async def test_condition_menu_offers_weight_and_condition_choices() -> None:
+    messenger = InMemoryConditionPromptSender()
+    handled = await MenuActionRouter(messenger).handle(
+        "U123", "action=menu&version=1&target=condition"
+    )
+    assert handled is True
+    assert messenger.texts == []
+    assert messenger.quick_replies[-1][1] == CONDITION_HUB_PROMPT
+    choices = dict(messenger.quick_replies[-1][2])
+    assert choices["体重"] == WEIGHT_START_POSTBACK
+    assert choices["コンディション"] == CONDITION_ACTIVITY_POSTBACK
+
+
+async def test_condition_activity_choice_explains_follow_up_flow() -> None:
+    messenger = InMemoryConditionPromptSender()
+    handled = await MenuActionRouter(messenger).handle(
+        "U123", CONDITION_ACTIVITY_POSTBACK
+    )
+    assert handled is True
+    assert messenger.texts == [("U123", MENU_MESSAGES["condition"])]
 
 
 async def test_non_menu_postback_is_not_consumed() -> None:

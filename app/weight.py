@@ -36,7 +36,7 @@ class WeightLogStore(Protocol):
 
 class WeightTargetStore(Protocol):
     async def get(self, user_id: str) -> float | None: ...
-    async def save(self, user_id: str, kilograms: float) -> None: ...
+    async def save(self, user_id: str, kilograms: float | None) -> None: ...
 
 
 class WeightDraftStore(Protocol):
@@ -100,39 +100,65 @@ class WeightWorkflow:
         value = text.strip()
         if not _is_weight_command(value):
             return False
-        existing = await self._drafts.get(line_user_id)
-        if (
-            existing is not None
-            and existing.expires_at > self._clock()
-            and value in START_COMMANDS | TARGET_COMMANDS
-        ):
-            await self._prompt(existing)
-            return True
-        profile = await self._profile(line_user_id)
-        draft = WeightDraft(
-            line_user_id=line_user_id,
-            user_id=line_user_id,
-            operation_id=str(uuid.uuid4()),
-            timezone=profile.timezone,
-            expires_at=self._clock() + DRAFT_TTL,
-        )
-        inline_kg = _inline_kilograms(value)
         inline_target = _inline_target(value)
         if inline_target is not None:
             await self._save_target(line_user_id, inline_target)
             return True
         if value in TARGET_COMMANDS:
-            draft.step = "target"
+            profile = await self._profile(line_user_id)
+            draft = WeightDraft(
+                line_user_id=line_user_id,
+                user_id=line_user_id,
+                operation_id=str(uuid.uuid4()),
+                step="target",
+                timezone=profile.timezone,
+                expires_at=self._clock() + DRAFT_TTL,
+            )
             await self._drafts.save(draft)
             await self._prompt(draft)
             return True
+        inline_kg = _inline_kilograms(value)
         if inline_kg is not None:
-            draft.measured_on = self._local_today(draft.timezone)
-            draft.kilograms = inline_kg
-            draft.step = "confirm"
+            await self.record_kilograms(line_user_id, inline_kg)
+            return True
+        await self.start_today_entry(line_user_id)
+        return True
+
+    async def start_today_entry(self, line_user_id: str) -> None:
+        profile = await self._profile(line_user_id)
+        draft = WeightDraft(
+            line_user_id=line_user_id,
+            user_id=line_user_id,
+            operation_id=str(uuid.uuid4()),
+            step="kg",
+            timezone=profile.timezone,
+            measured_on=self._local_today(profile.timezone),
+            expires_at=self._clock() + DRAFT_TTL,
+        )
         await self._drafts.save(draft)
         await self._prompt(draft)
-        return True
+
+    async def record_kilograms(
+        self,
+        line_user_id: str,
+        kilograms: float,
+        measured_on: date | None = None,
+    ) -> None:
+        profile = await self._profile(line_user_id)
+        timezone = profile.timezone
+        measured = measured_on or self._local_today(timezone)
+        self._validate_measured_on(measured, timezone)
+        draft = WeightDraft(
+            line_user_id=line_user_id,
+            user_id=line_user_id,
+            operation_id=str(uuid.uuid4()),
+            step="confirm",
+            timezone=timezone,
+            measured_on=measured,
+            kilograms=kilograms,
+            expires_at=self._clock() + DRAFT_TTL,
+        )
+        await self._complete(draft)
 
     async def handle_postback(self, line_user_id: str, data: str) -> bool:
         values = {key: items[0] for key, items in parse_qs(data).items() if items}
@@ -146,6 +172,9 @@ class WeightWorkflow:
             return True
         if values.get("op") == "save":
             return await self._handle_save(line_user_id, values.get("oid"))
+        if values.get("op") == "start":
+            await self.start_today_entry(line_user_id)
+            return True
         draft = await self._require_draft(line_user_id)
         self._ensure_operation(draft, values.get("oid"))
         operation = values.get("op", "")
@@ -178,6 +207,14 @@ class WeightWorkflow:
         if await self.start(line_user_id, value):
             return True
         draft = await self._drafts.get(line_user_id)
+        if looks_like_kilograms(value) and (
+            draft is None or draft.step in {"date", "kg", "confirm"}
+        ):
+            measured = draft.measured_on if draft and draft.measured_on else None
+            await self.record_kilograms(
+                line_user_id, parse_kilograms(value), measured_on=measured
+            )
+            return True
         if draft is None:
             return False
         self._ensure_fresh(draft)
@@ -185,11 +222,6 @@ class WeightWorkflow:
             draft.measured_on = _parse_local_date(value, draft.timezone, self._clock())
             self._validate_measured_on(draft.measured_on, draft.timezone)
             draft.step = "kg"
-        elif draft.step == "kg":
-            draft.kilograms = parse_kilograms(value)
-            if draft.measured_on is None:
-                draft.measured_on = self._local_today(draft.timezone)
-            draft.step = "confirm"
         elif draft.step == "target":
             await self._save_target(line_user_id, parse_kilograms(value))
             await self._drafts.delete(line_user_id)
@@ -290,9 +322,26 @@ class WeightWorkflow:
             )
             return
         if draft.step == "kg":
-            await self._messenger.send_text(
+            today = self._local_today(draft.timezone)
+            if draft.measured_on is None or draft.measured_on == today:
+                prompt = (
+                    "今日の体重をkgで送ってください。"
+                    "数字だけ送るとそのまま記録されます。"
+                )
+            else:
+                prompt = (
+                    f"{draft.measured_on.isoformat()}の体重をkgで送ってください。"
+                    "数字だけ送るとそのまま記録されます。"
+                )
+            await self._messenger.send_quick_reply(
                 draft.line_user_id,
-                f"{draft.measured_on.isoformat()}の体重をkgで入力してください。",
+                prompt,
+                [
+                    ("昨日", _weight_data(draft, "when", v="yesterday")),
+                    ("日付を入力", _weight_data(draft, "when", v="custom")),
+                    ("目標体重", _weight_data(draft, "when", v="target")),
+                    ("キャンセル", _weight_data(draft, "cancel")),
+                ],
             )
             return
         if draft.step == "target":
@@ -486,7 +535,10 @@ class InMemoryWeightTargetStore:
     async def get(self, user_id: str) -> float | None:
         return self.targets.get(user_id)
 
-    async def save(self, user_id: str, kilograms: float) -> None:
+    async def save(self, user_id: str, kilograms: float | None) -> None:
+        if kilograms is None:
+            self.targets.pop(user_id, None)
+            return
         self.targets[user_id] = kilograms
 
 
@@ -504,12 +556,12 @@ class FirestoreWeightTargetStore:
         stored = values.get("kilograms")
         return float(stored) if stored is not None else None
 
-    async def save(self, user_id: str, kilograms: float) -> None:
-        await (
-            self._client.collection("weight_targets")
-            .document(user_id)
-            .set({"kilograms": kilograms})
-        )
+    async def save(self, user_id: str, kilograms: float | None) -> None:
+        document = self._client.collection("weight_targets").document(user_id)
+        if kilograms is None:
+            await document.delete()
+            return
+        await document.set({"kilograms": kilograms})
 
 
 class InMemoryWeightDraftStore:
@@ -572,18 +624,7 @@ def weight_log_id(user_id: str, operation_id: str) -> str:
 
 
 def parse_kilograms(value: str) -> float:
-    normalized = (
-        value.strip()
-        .replace("ｋｇ", "kg")
-        .replace("ＫＧ", "kg")
-        .replace("KG", "kg")
-        .replace("Kg", "kg")
-        .replace("kg", "")
-        .replace(" ", "")
-        .replace("　", "")
-        .replace("．", ".")
-        .translate(str.maketrans("０１２３４５６７８９", "0123456789"))
-    )
+    normalized = _normalize_kg_input(value)
     try:
         amount = Decimal(normalized)
     except InvalidOperation as exc:
@@ -592,6 +633,14 @@ def parse_kilograms(value: str) -> float:
     if kilograms < MIN_KG or kilograms > MAX_KG:
         raise InvalidWeightAction("体重は25.0〜250.0kgで入力してください。")
     return float(kilograms)
+
+
+def looks_like_kilograms(value: str) -> bool:
+    try:
+        Decimal(_normalize_kg_input(value))
+    except InvalidOperation:
+        return False
+    return True
 
 
 def current_logs_by_day(logs: list[WeightLog]) -> dict[date, WeightLog]:
@@ -638,6 +687,21 @@ def _window_average(
         KG_QUANTUM, rounding=ROUND_HALF_UP
     )
     return float(average), len(values)
+
+
+def _normalize_kg_input(value: str) -> str:
+    return (
+        value.strip()
+        .replace("ｋｇ", "kg")
+        .replace("ＫＧ", "kg")
+        .replace("KG", "kg")
+        .replace("Kg", "kg")
+        .replace("kg", "")
+        .replace(" ", "")
+        .replace("　", "")
+        .replace("．", ".")
+        .translate(str.maketrans("０１２３４５６７８９", "0123456789"))
+    )
 
 
 def _is_weight_command(value: str) -> bool:

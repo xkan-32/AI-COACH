@@ -26,7 +26,7 @@ Quick ReplyとButtons Templateは対話UIだが、画面下部に常設される
 | 位置 | 表示 | action | 初期動作 |
 |---|---|---|---|
 | 上段左 | 今日の提案 | `today_proposal` | 最新の有効な提案を表示 |
-| 上段中央 | 体調を記録 | `condition` | 日次体調入力を開始 |
+| 上段中央 | 体調を記録 | `condition` | 体調ハブ（体重など）をQuick Replyで開始 |
 | 上段右 | 運動を記録 | `manual_activity` | 手動Activity入力を開始 |
 | 下段左 | 目標 | `goals` | 設定済み目標の一覧表示（読み取り専用） |
 | 下段中央 | 記録・進捗 | `progress` | 直近活動・週間進捗への入口 |
@@ -108,7 +108,7 @@ rollbackする場合は、直前commitをrevertしてmainへmergeする。旧画
 | target | RM-03での応答 |
 |---|---|
 | `today_proposal` | アクティビティ後の体調記録と最新提案メッセージを案内 |
-| `condition` | 既存のアクティビティ後体調確認を案内 |
+| `condition` | 体調ハブを出し、体重記録またはアクティビティ後の体調確認へ進める |
 | `manual_activity` | LINE会話で手動Activityを登録し、確認後にStravaへ作成する |
 | `goals` | 有効な目標一覧だけを表示。編集は「設定」から行う |
 | `progress` | 準備中と既存フィードバックを案内 |
