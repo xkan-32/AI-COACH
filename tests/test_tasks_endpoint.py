@@ -39,10 +39,8 @@ def test_line_event_worker_routes_every_rich_menu_action(target: str) -> None:
             "/settings/profile/start?token=" in runtime.messenger.settings_links[0][1]
         )
     elif target in {"today_proposal", "training_menu", "progress"}:
-        assert runtime.messenger.weekly_plan_links == []
-        assert runtime.messenger.texts == [
-            ("U-menu", "確認できる週間計画はまだありません。")
-        ]
+        assert len(runtime.messenger.weekly_plan_links) == 1
+        assert runtime.messenger.texts == []
     elif target == "manual_activity":
         assert runtime.messenger.quick_replies == []
         assert "Strava連携が必要です" in runtime.messenger.texts[-1][1]
