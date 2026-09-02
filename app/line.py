@@ -52,6 +52,29 @@ class LineConditionPromptSender:
     async def send_text(self, line_user_id: str, text: str) -> None:
         await self._push(line_user_id, {"type": "text", "text": text})
 
+    async def send_quick_reply(
+        self,
+        line_user_id: str,
+        text: str,
+        choices: list[tuple[str, str]],
+    ) -> None:
+        items = [
+            {
+                "type": "action",
+                "action": {
+                    "type": "postback",
+                    "label": label,
+                    "data": data,
+                    "displayText": label,
+                },
+            }
+            for label, data in choices
+        ]
+        await self._push(
+            line_user_id,
+            {"type": "text", "text": text, "quickReply": {"items": items}},
+        )
+
     async def send_proposal(self, line_user_id: str, proposal: WorkoutProposal) -> None:
         items = [
             {
@@ -114,12 +137,18 @@ class InMemoryConditionPromptSender:
         self.sent: list[tuple[str, Activity]] = []
         self.texts: list[tuple[str, str]] = []
         self.proposals: list[tuple[str, WorkoutProposal]] = []
+        self.quick_replies: list[tuple[str, str, list[tuple[str, str]]]] = []
 
     async def send(self, line_user_id: str, activity: Activity) -> None:
         self.sent.append((line_user_id, activity))
 
     async def send_text(self, line_user_id: str, text: str) -> None:
         self.texts.append((line_user_id, text))
+
+    async def send_quick_reply(
+        self, line_user_id: str, text: str, choices: list[tuple[str, str]]
+    ) -> None:
+        self.quick_replies.append((line_user_id, text, choices))
 
     async def send_proposal(self, line_user_id: str, proposal: WorkoutProposal) -> None:
         self.proposals.append((line_user_id, proposal))

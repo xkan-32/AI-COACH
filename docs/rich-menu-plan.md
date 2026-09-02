@@ -110,9 +110,11 @@ rollbackする場合は、直前commitをrevertしてmainへmergeする。旧画
 | `today_proposal` | アクティビティ後の体調記録と最新提案メッセージを案内 |
 | `condition` | 既存のアクティビティ後体調確認を案内 |
 | `manual_activity` | 準備中を案内し、Stravaを直接更新しないことを明示 |
-| `goals` | 有効な目標一覧と追加・変更・無効化の会話UIを開始 |
+| `goals` | 有効な目標一覧を表示し、追加・変更・無効化をQuick Replyで選択 |
 | `progress` | 準備中と既存フィードバックを案内 |
-| `settings` | 目標・運動環境・Strava連携の設定入口を表示 |
+| `settings` | 目標・運動環境の設定入口をQuick Replyで表示 |
+
+PF-01では操作コマンドやIDの手入力を通常導線にしない。目標の操作、主目標／副目標、登録済み項目、運動環境の既知区分はpostback Quick Replyで選択する。目標内容、日付、未定義の運動環境など自由記述が必要な値だけをテキスト入力する。既存テキストコマンドは後方互換用として維持する。
 
 メニューpostbackはLINE Webhookで署名検証・event重複排除後に既存Cloud Tasksへenqueueされ、workerで処理される。
 提案承認postbackの署名、期限、所有者検証経路には入らず、メニュー押下だけでStrava更新Taskを作成しない。
