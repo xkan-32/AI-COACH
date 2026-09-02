@@ -27,6 +27,9 @@ class ActivityStore(Protocol):
     async def get(self, activity_id: str) -> Activity | None: ...
     async def save(self, activity: Activity) -> None: ...
     async def list_recent(self, athlete_id: str, limit: int) -> list[Activity]: ...
+    async def list_recent_for_user(
+        self, user_id: str, limit: int
+    ) -> list[Activity]: ...
 
 
 class ConditionPromptSender(Protocol):
@@ -244,6 +247,14 @@ class InMemoryActivityStore:
         ]
         return sorted(matches, key=lambda item: item.started_at, reverse=True)[:limit]
 
+    async def list_recent_for_user(self, user_id: str, limit: int) -> list[Activity]:
+        matches = [
+            activity
+            for activity in self.activities.values()
+            if activity.user_id == user_id
+        ]
+        return sorted(matches, key=lambda item: item.started_at, reverse=True)[:limit]
+
 
 class BigQueryActivityStore:
     def __init__(self, client: object, table: str) -> None:
@@ -315,6 +326,24 @@ class BigQueryActivityStore:
         config = bigquery.QueryJobConfig(
             query_parameters=[
                 bigquery.ScalarQueryParameter("athlete_id", "STRING", athlete_id),
+                bigquery.ScalarQueryParameter("limit", "INT64", limit),
+            ]
+        )
+        rows = await asyncio.to_thread(
+            lambda: list(self._client.query(query, job_config=config).result())
+        )
+        return [_activity_from_row(row) for row in rows]
+
+    async def list_recent_for_user(self, user_id: str, limit: int) -> list[Activity]:
+        from google.cloud import bigquery
+
+        query = (
+            f"SELECT * FROM `{self._table}` WHERE user_id = @user_id "
+            "ORDER BY started_at DESC LIMIT @limit"
+        )
+        config = bigquery.QueryJobConfig(
+            query_parameters=[
+                bigquery.ScalarQueryParameter("user_id", "STRING", user_id),
                 bigquery.ScalarQueryParameter("limit", "INT64", limit),
             ]
         )

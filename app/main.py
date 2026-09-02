@@ -3,6 +3,7 @@ from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Literal
 from urllib.parse import parse_qs, quote
+from zoneinfo import ZoneInfo
 
 from fastapi import FastAPI, HTTPException, Query, Request, Response
 from fastapi.responses import FileResponse, RedirectResponse
@@ -70,6 +71,7 @@ from app.web_settings import InvalidSettingsToken, SettingsTokenSigner
 from app.web_weekly_plan import (
     InvalidWeeklyPlanToken,
     WeeklyPlanWebSigner,
+    build_training_dashboard_dto,
     build_weekly_plan_dto,
 )
 from app.webhooks import verify_line_signature
@@ -338,6 +340,12 @@ async def _active_plan_for_line(line_user_id: str):
         if plan is not None and plan.line_user_id == line_user_id:
             return plan
     return None
+
+
+async def _local_today(user_id: str) -> date:
+    profile = await runtime.training_settings_state.get_profile(user_id)
+    timezone = profile.timezone if profile is not None else "Asia/Tokyo"
+    return datetime.now(UTC).astimezone(ZoneInfo(timezone)).date()
 
 
 async def send_weekly_plan_link(line_user_id: str) -> None:
@@ -729,6 +737,11 @@ async def get_weekly_plan(request: Request, response: Response) -> dict[str, obj
         previous_workouts=previous_workouts,
     )
     result["revision"] = {"enabled": is_active and approval is None}
+    result["dashboard"] = build_training_dashboard_dto(
+        workouts=workouts,
+        local_today=await _local_today(plan.user_id),
+        activities=await runtime.activities.list_recent_for_user(plan.user_id, 20),
+    )
     return result
 
 

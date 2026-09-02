@@ -12,7 +12,7 @@
       <circle cx="2083" cy="1120" r="155"/><path d="M2083 930v80M2083 1230v80M1893 1120h80M2193 1120h80"/>
     </g>
     <g fill="#173F38" font-size="74" font-weight="700">
-      <text x="416" y="680">今日の提案</text><text x="1249" y="680">体調を記録</text><text x="2083" y="680">運動を記録</text>
+      <text x="416" y="680">練習メニュー</text><text x="1249" y="680">体調を記録</text><text x="2083" y="680">運動を記録</text>
       <text x="416" y="1515">目標</text><text x="1249" y="1515">記録・進捗</text><text x="2083" y="1515">設定</text>
     </g>
   </g>

@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from typing import Protocol
 
+from app.domain.models import Activity
 from app.plan_approval import PlanActionSigner, PlanApprovalState
 from app.planning import PlannedWorkout, TrainingPlanVersion
 
@@ -246,6 +247,28 @@ def build_weekly_plan_dto(
     }
 
 
+def build_training_dashboard_dto(
+    *,
+    workouts: list[PlannedWorkout],
+    local_today: date,
+    activities: list[Activity],
+) -> dict[str, object]:
+    """Return only owner-safe, display-oriented training history fields."""
+    return {
+        "today": {
+            "date": local_today.isoformat(),
+            "workouts": [
+                _workout_dto(item)
+                for item in workouts
+                if item.scheduled_date == local_today
+            ],
+        },
+        "history": {
+            "activities": [_activity_dto(item) for item in activities],
+        },
+    }
+
+
 def _workout_dto(workout: PlannedWorkout) -> dict[str, object]:
     return {
         "id": workout.id,
@@ -260,6 +283,19 @@ def _workout_dto(workout: PlannedWorkout) -> dict[str, object]:
         "environment_ids": list(workout.environment_ids),
         "rationale": workout.rationale,
         "safety_constraints": list(workout.safety_constraints),
+    }
+
+
+def _activity_dto(activity: Activity) -> dict[str, object]:
+    return {
+        "id": activity.id,
+        "type": activity.activity_type,
+        "started_at": activity.started_at.isoformat(),
+        "duration_minutes": (activity.duration_seconds + 59) // 60,
+        "distance_meters": activity.distance_meters,
+        "intensity": activity.perceived_intensity,
+        "completion_status": activity.completion_status,
+        "source": activity.source_type.value,
     }
 
 
