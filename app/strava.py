@@ -314,6 +314,50 @@ class StravaClient:
                 "Strava activity route fetch failed", error_kind="invalid_response"
             ) from exc
 
+    async def create_activity(
+        self,
+        access_token: str,
+        *,
+        name: str,
+        sport_type: str,
+        start_date_local: str,
+        elapsed_time: int,
+        description: str = "",
+        distance: float = 0,
+    ) -> Activity:
+        try:
+            async with httpx.AsyncClient(timeout=self._timeout) as client:
+                response = await client.post(
+                    f"{self.api_base_url}/activities",
+                    headers={"Authorization": f"Bearer {access_token}"},
+                    data={
+                        "name": name,
+                        "sport_type": sport_type,
+                        "start_date_local": start_date_local,
+                        "elapsed_time": elapsed_time,
+                        "description": description,
+                        "distance": distance,
+                    },
+                )
+                response.raise_for_status()
+                return StravaActivityResponse.model_validate(
+                    response.json()
+                ).to_domain()
+        except httpx.HTTPStatusError as exc:
+            raise StravaApiError(
+                "Strava activity create failed",
+                status_code=exc.response.status_code,
+                error_kind="http_status",
+            ) from exc
+        except httpx.RequestError as exc:
+            raise StravaApiError(
+                "Strava activity create failed", error_kind="transport"
+            ) from exc
+        except ValueError as exc:
+            raise StravaApiError(
+                "Strava activity create failed", error_kind="invalid_response"
+            ) from exc
+
     async def update_description(
         self, activity_id: str, access_token: str, description: str
     ) -> None:

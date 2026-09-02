@@ -295,7 +295,7 @@ AIが計画変更を必要と判断しても、自動的に確定しない。ユ
 すべての運動を共通Activityとして分析する一方、取得元を明示する。
 
 - `strava`: ウォッチ等からStravaへ連携されたランニング、バイク等
-- `line_manual`: LINEリッチメニューから登録したウェイト、自宅トレーニング等
+- `line_manual`: LINEリッチメニューから登録し、確認後にStrava Manual Activityとして作成するウェイト、自宅トレーニング等
 
 手動Activityでは以下を登録できるようにする。
 
@@ -486,10 +486,11 @@ AI実行前に制約を作り、AI出力後にも同じ制約で検証する。�
 
 ### MA-01 共通手動Activity
 
-実装済み。LINE会話登録、途中保存、TTL、冪等保存、Strava非更新は`docs/next-session-ma-01.md`を参照する。
+実装済み。LINE会話登録、Strava Manual Activity作成、途中保存、TTL、冪等保存は`docs/next-session-ma-01.md`を参照する。
 
-- ウェイト、自宅トレーニング等を共通Activity境界へ登録する。
+- ウェイト、自宅トレーニング等をStrava上のActivityとして登録し、共通Activity境界へも保存する。
 - PlannedWorkoutの明示選択、cancel、TTL、Task再送冪等性を持たせる。
+- 翌日提案の「投稿」は作成したStrava ActivityのDescriptionへ追記する。
 
 ### PL-01D 実績照合
 

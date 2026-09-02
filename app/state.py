@@ -23,6 +23,9 @@ class OAuthSessionStore(Protocol):
 
 class StravaTokenStore(Protocol):
     async def get(self, athlete_id: str) -> StoredStravaToken | None: ...
+    async def get_by_line_user_id(
+        self, line_user_id: str
+    ) -> StoredStravaToken | None: ...
     async def save(self, token: StoredStravaToken) -> None: ...
 
 
@@ -66,6 +69,12 @@ class InMemoryStravaTokenStore:
 
     async def get(self, athlete_id: str) -> StoredStravaToken | None:
         return self.tokens.get(athlete_id)
+
+    async def get_by_line_user_id(self, line_user_id: str) -> StoredStravaToken | None:
+        for token in self.tokens.values():
+            if token.line_user_id == line_user_id:
+                return token
+        return None
 
     async def save(self, token: StoredStravaToken) -> None:
         self.tokens[token.athlete_id] = token
@@ -191,6 +200,17 @@ class FirestoreStravaTokenStore:
             ),
             expires_at=values["expires_at"],
         )
+
+    async def get_by_line_user_id(self, line_user_id: str) -> StoredStravaToken | None:
+        snapshots = (
+            await self._client.collection("strava_tokens")
+            .where("line_user_id", "==", line_user_id)
+            .limit(1)
+            .get()
+        )
+        if not snapshots:
+            return None
+        return await self.get(str(snapshots[0].id))
 
     async def save(self, token: StoredStravaToken) -> None:
         document = self._client.collection("strava_tokens").document(token.athlete_id)

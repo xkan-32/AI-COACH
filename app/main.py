@@ -250,6 +250,7 @@ async def send_weekly_plan_link(line_user_id: str) -> None:
 
 
 def _manual_activity_workflow() -> ManualActivityWorkflow:
+    settings = get_settings()
     return ManualActivityWorkflow(
         runtime.manual_activity_drafts,
         runtime.activities,
@@ -259,6 +260,12 @@ def _manual_activity_workflow() -> ManualActivityWorkflow:
         environments=runtime.training_resources,
         planning_history=runtime.planning_history,
         active_plans=runtime.active_plan_pointers,
+        tokens=runtime.tokens,
+        strava=StravaOAuthClient(
+            settings.strava_client_id, settings.strava_client_secret
+        ),
+        publications=runtime.manual_strava_publications,
+        ingestion_state=runtime.activity_ingestion_state,
         on_completed=_send_manual_activity_condition_prompt,
     )
 
@@ -638,7 +645,6 @@ async def decide_proposal_task(
         runtime.proposal_analytics,
         runtime.tokens,
         StravaOAuthClient(settings.strava_client_id, settings.strava_client_secret),
-        activities=runtime.activities,
     )
     try:
         result = await service.decide(task)

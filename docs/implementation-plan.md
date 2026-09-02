@@ -94,11 +94,11 @@ Exit: LINE所有者だけが週間案を確認・決定でき、未承認・却�
 ### Phase 2.9 - LINE manual activity（実装済み）
 
 - リッチメニュー「運動を記録」から会話で実施記録を登録
-- 共通Activity境界へ`source_type=line_manual`で保存し、任意の当日PlannedWorkoutと運動環境を紐付ける
-- 途中保存、cancel、24時間TTL、operation IDによる冪等保存
-- 保存後に既存の体調確認へ接続。Stravaは更新しない
+- 確認ボタンを明示承認としてStrava Manual Activityを作成し、共通Activity境界へ`source_type=line_manual`で保存する
+- 途中保存、cancel、24時間TTL、publication storeによる冪等作成
+- 保存後に既存の体調確認へ接続。翌日提案の「投稿」は同じStrava ActivityのDescriptionへ追記する
 
-Exit: Strava未連携でも運動記録を保存でき、明示承認なしにStravaは変わらない。
+Exit: 連携済みユーザーの手動記録がStrava上のActivityになり、提案投稿が同じActivityへ載る。未連携ではStravaを更新しない。
 
 ### Phase 3 - Approval and Strava update（実装済み）
 

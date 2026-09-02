@@ -41,7 +41,7 @@ Strava Webhook -> Cloud Tasks -> Activity取得・保存
 - AC-02（GPS非保存の250m区間負荷、HMAC route fingerprint、同一ルート比較）
 - PL-01B（手動shadow週間生成）
 - PL-01C（署名付き週間計画画面と初回承認）
-- MA-01（LINE手動Activity。Stravaは更新しない）
+- MA-01（LINE手動Activity。確認後にStrava Manual Activityを作成し、提案はDescriptionへ追記）
 
 未実装・拡張対象:
 
@@ -126,7 +126,7 @@ PF-01の対象外:
 - 種別、日時、時間、強度、内容、commentを会話形式で登録する。
 - `completed/partial/replaced/skipped`を扱う。
 - 入力途中保存、cancel、TTL、再開を実装する。
-- Strava Manual Activity作成は別の明示承認を必須にする。
+- 「記録する」でStrava Manual Activityを作成し、翌日提案の「投稿」で同じActivityへ追記する。
 
 ### WT-01 体重
 
