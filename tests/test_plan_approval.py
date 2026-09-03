@@ -388,6 +388,14 @@ def test_training_menu_opens_one_time_weekly_plan_and_approves() -> None:
         assert dto.status_code == 200
         body = dto.json()
         assert len(body["plan"]["days"]) == 7
+        assert body["plan"]["training_response"] == {
+            "evidence_source": "confirmed_planned_activities",
+            "completed_activity_count": 0,
+            "hard_rpe_activity_count": 0,
+            "recommended_maximum_moderate_days": None,
+            "reason_codes": ["no_confirmed_planned_response"],
+        }
+        assert "input_snapshot" not in json.dumps(body, ensure_ascii=False)
         approved = client.post(
             "/weekly-plan/api/decision",
             json={
