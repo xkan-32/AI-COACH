@@ -220,6 +220,9 @@ async def test_valid_shadow_plan_is_saved_without_sensitive_free_text() -> None:
     profiles = generator.inputs[0]["performance_profiles"]
     assert {item["sport"] for item in profiles} == {"running", "cycling"}
     assert profiles[0]["evidence_activity_ids"] == ["activity-1"]
+    response = generator.inputs[0]["recent_training_response"]
+    assert response["version"] == "training-response-v1"
+    assert response["evidence_activity_ids"] == ["activity-1"]
     assert "位置情報らしき自由記述" not in encoded_input
     assert "体調自由記述" not in encoded_input
     assert history.safety_gate_results.popitem()[1].status == SafetyGateStatus.ALLOWED

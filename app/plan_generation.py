@@ -26,6 +26,7 @@ from app.planning import (
     planning_input_digest,
     stable_planning_id,
 )
+from app.training_response import derive_training_response_signal
 from app.workout_catalog import CATALOG, catalog_payload, prescribe
 
 PLAN_PROMPT_VERSION = "weekly-plan-v3"
@@ -363,6 +364,7 @@ def build_weekly_plan_input(
         for item in activities
         if now - timedelta(days=7) <= item.started_at <= now
     )
+    training_response = derive_training_response_signal(list(activities), now)
     latest_condition = (
         max(conditions, key=lambda item: item.reported_at).level.value
         if conditions
@@ -381,6 +383,14 @@ def build_weekly_plan_input(
     )
     if latest_condition in {"pain", "discomfort"}:
         weekly_limit = min(weekly_limit, 120)
+    maximum_moderate_days = (
+        0 if latest_condition in {"pain", "discomfort", "fatigued"} else 2
+    )
+    if training_response.recommended_maximum_moderate_days is not None:
+        maximum_moderate_days = min(
+            maximum_moderate_days,
+            training_response.recommended_maximum_moderate_days,
+        )
     return {
         "generation_key": generation_key,
         "generation_reason": generation_reason,
@@ -444,6 +454,7 @@ def build_weekly_plan_input(
         "performance_profiles": [
             item.model_dump(mode="json") for item in performance_profiles
         ],
+        "recent_training_response": training_response.model_dump(mode="json"),
         "workout_catalog": catalog_payload(),
         "recent_conditions": [
             {
@@ -460,9 +471,7 @@ def build_weekly_plan_input(
                 (week_start + timedelta(days=offset)).isoformat() for offset in range(7)
             ],
             "weekly_duration_limit_minutes": weekly_limit,
-            "maximum_moderate_days": 0
-            if latest_condition in {"pain", "discomfort", "fatigued"}
-            else 2,
+            "maximum_moderate_days": maximum_moderate_days,
             "no_consecutive_moderate_days": True,
             "latest_condition": latest_condition,
             "availability_is_mandatory": True,
