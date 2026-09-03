@@ -16,9 +16,11 @@ from app.plan_approval import (
 from app.planning import (
     InMemoryActivePlanPointerStore,
     InMemoryPlanningHistoryStore,
+    ReconciliationStatus,
     TrainingPlanStatus,
     create_plan_version,
     create_planned_workout,
+    create_reconciliation,
 )
 from app.web_weekly_plan import (
     InMemoryWeeklyPlanLinkStore,
@@ -98,6 +100,55 @@ async def setup_service(plan=None):
     await service.register_draft(plan)
     approval = await service.present(plan)
     return service, states, history, pointers, signer, plan, workout, approval
+
+
+async def test_weekly_plan_dto_exposes_safe_latest_reconciliation_summary() -> None:
+    _, _, _, _, signer, plan, workout, approval = await setup_service()
+    initial = create_reconciliation(
+        workout,
+        "strava",
+        "workout-matcher-v2",
+        "activity-private-id",
+        status=ReconciliationStatus.AMBIGUOUS,
+        match_confidence=0.65,
+        matching_evidence=["same_local_date"],
+        confirmed=False,
+        operation_id="initial",
+        created_at=NOW,
+    )
+    corrected = create_reconciliation(
+        workout,
+        "strava",
+        "workout-matcher-v2",
+        "activity-private-id",
+        status=ReconciliationStatus.MATCHED,
+        match_confidence=1.0,
+        matching_evidence=["user_confirmed_planned_workout"],
+        confirmed=True,
+        operation_id="corrected",
+        supersedes_reconciliation_id=initial.id,
+        created_at=NOW + timedelta(seconds=1),
+    )
+
+    dto = build_weekly_plan_dto(
+        plan=plan,
+        workouts=[workout],
+        approval=approval,
+        action_signer=signer,
+        reconciliations=[initial, corrected],
+    )
+
+    assert dto["plan"]["reconciliation_summary"] == [
+        {
+            "scheduled_date": "2026-09-07",
+            "workout_type": "easy_run",
+            "status": "matched",
+            "confirmed": True,
+            "match_confidence": 1.0,
+            "matching_evidence": ["user_confirmed_planned_workout"],
+        }
+    ]
+    assert "activity-private-id" not in json.dumps(dto, ensure_ascii=False)
 
 
 def test_plan_action_token_rejects_tampering_expiry_and_wrong_decision() -> None:
@@ -395,6 +446,7 @@ def test_training_menu_opens_one_time_weekly_plan_and_approves() -> None:
             "recommended_maximum_moderate_days": None,
             "reason_codes": ["no_confirmed_planned_response"],
         }
+        assert body["plan"]["reconciliation_summary"] == []
         assert "input_snapshot" not in json.dumps(body, ensure_ascii=False)
         approved = client.post(
             "/weekly-plan/api/decision",
