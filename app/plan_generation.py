@@ -26,7 +26,7 @@ from app.planning import (
     planning_input_digest,
     stable_planning_id,
 )
-from app.workout_catalog import catalog_payload, prescribe
+from app.workout_catalog import CATALOG, catalog_payload, prescribe
 
 PLAN_PROMPT_VERSION = "weekly-plan-v3"
 PLAN_SAFETY_RULE_VERSION = "weekly-plan-safety-v2"
@@ -37,6 +37,7 @@ COLD_START_MAX_WEEKLY_MINUTES = 180
 class WeeklyWorkoutOutput(BaseModel):
     scheduled_date: date
     workout_type: str = Field(min_length=1, max_length=80)
+    template_id: str | None = None
     target_duration_minutes: int = Field(ge=0, le=240)
     target_distance_meters: float | None = Field(default=None, ge=0)
     target_intensity: Literal["rest", "easy", "moderate"]
@@ -469,6 +470,8 @@ def build_weekly_plan_input(
         },
         "task": (
             "Create at least one conservative workout or rest entry for each date. "
+            "For every non-rest entry, select exactly one listed workout_catalog "
+            "template_id and preserve its title and intensity. "
             "A date may have multiple workouts only when they use different slots, or "
             "a single slot explicitly allows splitting. Never combine rest with another "
             "workout on the same date. Explain the weekly balance and each daily choice "
@@ -505,6 +508,15 @@ def validate_weekly_plan_output(
             ):
                 violations.append("invalid_rest_entry")
             continue
+        templates = {template.id: template for template in CATALOG}
+        template = templates.get(item.template_id or "")
+        if template is None:
+            violations.append("unknown_workout_template")
+        elif (
+            template.title != item.workout_type
+            or template.intensity != item.target_intensity
+        ):
+            violations.append("template_output_mismatch")
         total_minutes += item.target_duration_minutes
         if item.target_duration_minutes <= 0:
             violations.append("non_rest_requires_duration")
@@ -622,6 +634,7 @@ def fallback_weekly_plan(plan_input: dict[str, Any], reason: str) -> WeeklyPlanO
                     workout_type=(
                         prescribed["workout_type"] if prescribed else "easy_mobility"
                     ),
+                    template_id=prescribed["template_id"] if prescribed else None,
                     target_duration_minutes=duration,
                     target_intensity=(
                         prescribed["intensity"] if prescribed else "easy"
