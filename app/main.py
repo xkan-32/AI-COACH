@@ -428,7 +428,7 @@ async def _generate_initial_plan_for_line(line_user_id: str):
             operation_id=f"initial-menu-{week_start.isoformat()}-v{profile.version}",
             now=now,
         )
-    except Exception:
+    except BaseException:
         await runtime.events.release("weekly_plan_generation", event_key)
         raise
     await runtime.events.complete("weekly_plan_generation", event_key)

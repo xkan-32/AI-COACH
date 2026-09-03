@@ -1,8 +1,14 @@
+from datetime import UTC, datetime
+
 from fastapi.testclient import TestClient
 
 from app.domain.events import StravaWebhookEvent
 from app.main import app, runtime
-from app.state import InMemoryEventStore
+from app.state import (
+    EVENT_RESERVATION_LEASE,
+    InMemoryEventStore,
+    _reservation_is_stale,
+)
 
 
 def activity_event() -> StravaWebhookEvent:
@@ -39,6 +45,21 @@ async def test_event_reservation_is_idempotent() -> None:
     store = InMemoryEventStore()
     assert await store.reserve("strava", "event-1")
     assert not await store.reserve("strava", "event-1")
+
+
+def test_firestore_reservation_lease_recovers_only_stale_in_progress_events() -> None:
+    now = datetime(2026, 9, 3, 12, tzinfo=UTC)
+
+    assert _reservation_is_stale({"status": "reserved"}, now)
+    assert not _reservation_is_stale({"status": "reserved", "reserved_at": now}, now)
+    assert _reservation_is_stale(
+        {"status": "reserved", "reserved_at": now - EVENT_RESERVATION_LEASE},
+        now,
+    )
+    assert not _reservation_is_stale(
+        {"status": "completed", "reserved_at": now - EVENT_RESERVATION_LEASE},
+        now,
+    )
 
 
 def test_strava_webhook_returns_200_and_enqueues_activity_once() -> None:
