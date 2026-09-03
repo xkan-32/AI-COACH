@@ -1000,6 +1000,9 @@ async def get_weekly_plan(request: Request, response: Response) -> dict[str, obj
         action_signer=runtime.plan_action_signer,
         previous_plan=previous_plan,
         previous_workouts=previous_workouts,
+        reconciliations=await runtime.planning_history.list_plan_reconciliations(
+            plan.id
+        ),
     )
     result["revision"] = {"enabled": is_active and approval is None}
     result["dashboard"] = build_training_dashboard_dto(

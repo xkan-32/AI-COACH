@@ -11,7 +11,7 @@ from typing import Protocol
 
 from app.domain.models import Activity
 from app.plan_approval import PlanActionSigner, PlanApprovalState
-from app.planning import PlannedWorkout, TrainingPlanVersion
+from app.planning import PlannedWorkout, TrainingPlanVersion, WorkoutReconciliation
 
 
 class InvalidWeeklyPlanToken(ValueError):
@@ -196,6 +196,7 @@ def build_weekly_plan_dto(
     action_signer: PlanActionSigner,
     previous_plan: TrainingPlanVersion | None = None,
     previous_workouts: list[PlannedWorkout] | None = None,
+    reconciliations: list[WorkoutReconciliation] | None = None,
 ) -> dict[str, object]:
     current_by_date = _by_date(workouts)
     previous_by_date = _by_date(previous_workouts or [])
@@ -239,6 +240,9 @@ def build_weekly_plan_dto(
                 plan, workouts, previous_plan, previous_workouts or []
             ),
             "days": days,
+            "reconciliation_summary": _reconciliation_dto(
+                workouts, reconciliations or []
+            ),
         },
         "approval": (
             {"expires_at": approval.expires_at.isoformat(), "actions": actions}
@@ -246,6 +250,41 @@ def build_weekly_plan_dto(
             else None
         ),
     }
+
+
+def _reconciliation_dto(
+    workouts: list[PlannedWorkout], reconciliations: list[WorkoutReconciliation]
+) -> list[dict[str, object]]:
+    workout_by_id = {item.id: item for item in workouts}
+    superseded = {
+        item.supersedes_reconciliation_id
+        for item in reconciliations
+        if item.supersedes_reconciliation_id is not None
+    }
+    latest: dict[str, WorkoutReconciliation] = {}
+    for item in reconciliations:
+        if item.id in superseded or item.planned_workout_id not in workout_by_id:
+            continue
+        current = latest.get(item.planned_workout_id)
+        if current is None or item.created_at > current.created_at:
+            latest[item.planned_workout_id] = item
+    return [
+        {
+            "scheduled_date": workout_by_id[workout_id].scheduled_date.isoformat(),
+            "workout_type": workout_by_id[workout_id].workout_type,
+            "status": item.status.value,
+            "confirmed": item.confirmed,
+            "match_confidence": item.match_confidence,
+            "matching_evidence": list(item.matching_evidence),
+        }
+        for workout_id, item in sorted(
+            latest.items(),
+            key=lambda pair: (
+                workout_by_id[pair[0]].scheduled_date,
+                workout_by_id[pair[0]].sequence,
+            ),
+        )
+    ]
 
 
 def _training_response_dto(input_snapshot: dict) -> dict[str, object] | None:
