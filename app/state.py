@@ -1,5 +1,5 @@
 from collections.abc import Callable
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Protocol
 
 from app.strava import StoredStravaToken
@@ -90,15 +90,30 @@ class FirestoreEventStore:
         )
 
     async def reserve(self, provider: str, event_key: str) -> bool:
-        from google.api_core.exceptions import AlreadyExists
+        from google.cloud.firestore_v1.async_transaction import async_transactional
 
-        try:
-            await self._document(provider, event_key).create(
-                {"provider": provider, "event_key": event_key, "status": "reserved"}
-            )
-        except AlreadyExists:
-            return False
-        return True
+        document = self._document(provider, event_key)
+        now = datetime.now(UTC)
+
+        @async_transactional
+        async def reserve_once(transaction: object) -> bool:
+            snapshot = await document.get(transaction=transaction)
+            values = snapshot.to_dict() if snapshot.exists else None
+            if values is not None and not _reservation_is_stale(values, now):
+                return False
+            payload = {
+                "provider": provider,
+                "event_key": event_key,
+                "status": "reserved",
+                "reserved_at": now,
+            }
+            if values is None:
+                transaction.create(document, payload)
+            else:
+                transaction.set(document, payload)
+            return True
+
+        return await reserve_once(self._client.transaction())
 
     async def release(self, provider: str, event_key: str) -> None:
         await self._document(provider, event_key).delete()
@@ -109,6 +124,21 @@ class FirestoreEventStore:
         await self._document(provider, event_key).update(
             {"status": "completed", "processed_at": datetime.now(UTC)}
         )
+
+
+EVENT_RESERVATION_LEASE = timedelta(minutes=10)
+
+
+def _reservation_is_stale(values: dict, now: datetime) -> bool:
+    """Treat only in-progress reservations as recoverable after their lease."""
+    if values.get("status") != "reserved":
+        return False
+    reserved_at = values.get("reserved_at")
+    if not isinstance(reserved_at, datetime):
+        return True
+    if reserved_at.tzinfo is None:
+        reserved_at = reserved_at.replace(tzinfo=UTC)
+    return reserved_at.astimezone(UTC) + EVENT_RESERVATION_LEASE <= now
 
 
 class FirestoreOAuthSessionStore:
