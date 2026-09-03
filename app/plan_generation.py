@@ -26,6 +26,7 @@ from app.planning import (
     planning_input_digest,
     stable_planning_id,
 )
+from app.workout_catalog import catalog_payload, prescribe
 
 PLAN_PROMPT_VERSION = "weekly-plan-v3"
 PLAN_SAFETY_RULE_VERSION = "weekly-plan-safety-v2"
@@ -442,6 +443,7 @@ def build_weekly_plan_input(
         "performance_profiles": [
             item.model_dump(mode="json") for item in performance_profiles
         ],
+        "workout_catalog": catalog_payload(),
         "recent_conditions": [
             {
                 "activity_id": item.activity_id,
@@ -581,6 +583,9 @@ def fallback_weekly_plan(plan_input: dict[str, Any], reason: str) -> WeeklyPlanO
     workouts = []
     latest_condition = plan_input["hard_constraints"]["latest_condition"]
     valid_environment_ids = {item["id"] for item in plan_input["environments"]}
+    environment_names = {
+        item["id"]: item["name"] for item in plan_input["environments"]
+    }
     remaining_minutes = int(
         plan_input["hard_constraints"]["weekly_duration_limit_minutes"]
     )
@@ -600,16 +605,27 @@ def fallback_weekly_plan(plan_input: dict[str, Any], reason: str) -> WeeklyPlanO
             continue
         scheduled = False
         for slot in slots[:2]:
-            duration = min(20, int(slot["max_workout_minutes"]), remaining_minutes)
+            prescribed = prescribe(
+                slot, environment_names, plan_input["performance_profiles"]
+            )
+            duration = min(
+                prescribed["duration"] if prescribed else 20,
+                int(slot["max_workout_minutes"]),
+                remaining_minutes,
+            )
             if duration <= 0:
                 break
             remaining_minutes -= duration
             workouts.append(
                 WeeklyWorkoutOutput(
                     scheduled_date=scheduled_date,
-                    workout_type="easy_mobility",
+                    workout_type=(
+                        prescribed["workout_type"] if prescribed else "easy_mobility"
+                    ),
                     target_duration_minutes=duration,
-                    target_intensity="easy",
+                    target_intensity=(
+                        prescribed["intensity"] if prescribed else "easy"
+                    ),
                     availability_slot_id=slot["id"],
                     scheduled_start_local_time=time.fromisoformat(
                         slot["usable_start_local_time"]
@@ -619,8 +635,12 @@ def fallback_weekly_plan(plan_input: dict[str, Any], reason: str) -> WeeklyPlanO
                         for environment_id in slot["environment_ids"]
                         if environment_id in valid_environment_ids
                     ][:1],
-                    outdoors=False,
-                    rationale="利用可能時間内で回復を妨げない軽い運動です。",
+                    outdoors=prescribed["outdoors"] if prescribed else False,
+                    rationale=(
+                        prescribed["rationale"]
+                        if prescribed
+                        else "利用可能時間内で回復を妨げない軽い運動です。"
+                    ),
                 )
             )
             scheduled = True
