@@ -173,6 +173,35 @@ async def test_high_confidence_match_uses_type_time_duration_and_distance() -> N
     assert result.reconciliation.distance_delta_meters == 0
 
 
+async def test_same_type_activity_outside_scheduled_time_requires_confirmation() -> (
+    None
+):
+    history, pointers, settings, workouts = await setup_plan(
+        {
+            "workout_type": "run",
+            "target_duration_minutes": 30,
+            "target_distance_meters": 5000,
+            "scheduled_start_local_time": time(7),
+            "availability_slot_id": "monday-morning",
+        }
+    )
+    service = WorkoutReconciliationService(
+        history, pointers, settings, clock=lambda: NOW
+    )
+
+    result = await service.reconcile(activity())
+
+    assert result.reconciliation.status == ReconciliationStatus.AMBIGUOUS
+    assert result.reconciliation.confirmed is False
+    assert result.reconciliation.planned_workout_id == workouts[0].id
+    assert result.reconciliation.match_confidence == 0.69
+    assert "start_outside_180_minutes" in result.reconciliation.matching_evidence
+    assert (
+        "scheduled_time_requires_confirmation"
+        in result.reconciliation.matching_evidence
+    )
+
+
 async def test_close_candidates_remain_ambiguous_until_user_selects() -> None:
     history, pointers, settings, workouts = await setup_plan(
         {
