@@ -216,6 +216,9 @@ async def test_valid_shadow_plan_is_saved_without_sensitive_free_text() -> None:
     assert plan.plan_rationale.startswith("負荷日")
     assert len(workouts) == 7
     assert workouts[0].availability_slot_id == "slot-0"
+    profiles = generator.inputs[0]["performance_profiles"]
+    assert {item["sport"] for item in profiles} == {"running", "cycling"}
+    assert profiles[0]["evidence_activity_ids"] == ["activity-1"]
     assert "位置情報らしき自由記述" not in encoded_input
     assert "体調自由記述" not in encoded_input
     assert history.safety_gate_results.popitem()[1].status == SafetyGateStatus.ALLOWED
