@@ -1,12 +1,12 @@
 import logging
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, date, datetime, time, timedelta
 from pathlib import Path
 from typing import Literal
 from urllib.parse import parse_qs, quote
 from zoneinfo import ZoneInfo
 
 from fastapi import FastAPI, HTTPException, Query, Request, Response
-from fastapi.responses import FileResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
 
 from app.approval import (
@@ -42,10 +42,18 @@ from app.plan_revision import (
     RevisionScope,
 )
 from app.planning import (
+    AvailabilitySlot,
+    PlanVersionConflict,
+    PreferenceConfirmationStatus,
+    PreferenceSource,
+    PreferenceStrength,
     ReadinessStatus,
     ReconciliationStatus,
     TrainingSettingsService,
     UserTrainingProfile,
+    WeeklyAvailabilityVersion,
+    WorkoutPreference,
+    stable_planning_id,
 )
 from app.profile import (
     ACTIVITY_PLACES,
@@ -83,6 +91,7 @@ app = FastAPI(title="AI Training Coach", version="0.3.0")
 runtime = build_runtime(get_settings())
 SETTINGS_COOKIE = "profile_settings_session"
 SETTINGS_PAGE = Path(__file__).parent / "static" / "profile-settings.html"
+PLANNING_SETTINGS_PAGE = Path(__file__).parent / "static" / "planning-settings.html"
 WEEKLY_PLAN_COOKIE = "weekly_plan_session"
 WEEKLY_PLAN_PAGE = Path(__file__).parent / "static" / "weekly-plan.html"
 
@@ -156,6 +165,49 @@ class ProfileSettingsInput(BaseModel):
                 raise ValueError("同じ運動環境が重複しています。")
             keys.add(key)
         return self
+
+
+class AvailabilitySlotInput(BaseModel):
+    weekday: int = Field(ge=0, le=6)
+    start_local_time: time
+    end_local_time: time
+    max_workout_minutes: int | None = Field(default=None, ge=1, le=1440)
+    buffer_before_minutes: int = Field(default=0, ge=0, le=720)
+    buffer_after_minutes: int = Field(default=0, ge=0, le=720)
+    environment_ids: list[str] = Field(default_factory=list, max_length=20)
+    outdoors_allowed: bool = True
+    split_allowed: bool = False
+
+
+class WorkoutPreferenceInput(BaseModel):
+    preference_type: str = Field(min_length=1, max_length=80)
+    value: dict[str, object]
+    strength: PreferenceStrength = PreferenceStrength.SOFT
+
+
+class PlanningSettingsInput(BaseModel):
+    expected_availability_version: int | None = Field(default=None, ge=1)
+    operation_id: str = Field(min_length=1, max_length=64, pattern=r"^[A-Za-z0-9_-]+$")
+    slots: list[AvailabilitySlotInput] = Field(default_factory=list, max_length=50)
+    preferences: list[WorkoutPreferenceInput] = Field(
+        default_factory=list, max_length=20
+    )
+
+    @model_validator(mode="after")
+    def unique_slots_and_preferences(self) -> "PlanningSettingsInput":
+        keys = [
+            (item.weekday, item.start_local_time, item.end_local_time)
+            for item in self.slots
+        ]
+        if len(keys) != len(set(keys)):
+            raise ValueError("同じ曜日・時間帯の枠は重複登録できません。")
+        types = [item.preference_type for item in self.preferences]
+        if len(types) != len(set(types)):
+            raise ValueError("同じ種類の希望は1件だけ設定してください。")
+        return self
+
+
+PLANNING_SETTINGS_PREFERENCE_TYPES = {"weekend_intensity"}
 
 
 class WeeklyPlanGenerationTask(BaseModel):
@@ -603,16 +655,40 @@ async def start_profile_settings(token: str) -> RedirectResponse:
         httponly=True,
         secure=get_settings().app_env != "local",
         samesite="strict",
-        path="/settings/profile",
+        path="/settings",
     )
     response.headers["Cache-Control"] = "no-store"
     return response
 
 
-@app.get("/settings/profile", response_class=FileResponse)
-async def profile_settings_page(request: Request) -> FileResponse:
+@app.get("/settings/profile", response_class=HTMLResponse)
+async def profile_settings_page(request: Request) -> HTMLResponse:
     _settings_user(request)
-    response = FileResponse(SETTINGS_PAGE, media_type="text/html")
+    page = SETTINGS_PAGE.read_text(encoding="utf-8").replace(
+        "</main>",
+        '<section><h2>週間計画の条件</h2><p class="hint">曜日・朝夜ごとの時間、利用環境、希望強度を設定できます。</p><a class="add" style="display:block;text-align:center;text-decoration:none" href="/settings/planning">計画条件を設定</a></section></main>',
+        1,
+    )
+    response = HTMLResponse(page)
+    response.headers.update(
+        {
+            "Cache-Control": "no-store",
+            "Content-Security-Policy": (
+                "default-src 'self'; style-src 'self' 'unsafe-inline'; "
+                "script-src 'self' 'unsafe-inline'; img-src 'self' data:; "
+                "frame-ancestors 'none'; base-uri 'none'"
+            ),
+            "X-Frame-Options": "DENY",
+            "X-Content-Type-Options": "nosniff",
+        }
+    )
+    return response
+
+
+@app.get("/settings/planning", response_class=FileResponse)
+async def planning_settings_page(request: Request) -> FileResponse:
+    _settings_user(request)
+    response = FileResponse(PLANNING_SETTINGS_PAGE, media_type="text/html")
     response.headers.update(
         {
             "Cache-Control": "no-store",
@@ -696,6 +772,134 @@ async def update_profile_settings(
         if payload.target_weight_kg is not None:
             logger.info("weight_target_saved user_id=%s source=settings", line_user_id)
     return {"status": "saved", "revision": revision}
+
+
+def _training_settings_service() -> TrainingSettingsService:
+    return TrainingSettingsService(
+        runtime.training_settings_state, runtime.training_settings_history
+    )
+
+
+@app.get("/settings/planning/api")
+async def get_planning_settings(request: Request) -> dict[str, object]:
+    line_user_id = _settings_user(request)
+    service = _training_settings_service()
+    availability = await service.get_availability(line_user_id)
+    preferences = await service.effective_preferences(line_user_id, datetime.now(UTC))
+    resources = await runtime.training_resources.list(line_user_id)
+    return {
+        "availability": availability.model_dump(mode="json") if availability else None,
+        "preferences": [item.model_dump(mode="json") for item in preferences],
+        "training_environments": [item.model_dump(mode="json") for item in resources],
+    }
+
+
+@app.put("/settings/planning/api")
+async def update_planning_settings(
+    request: Request, payload: PlanningSettingsInput
+) -> dict[str, object]:
+    line_user_id = _settings_user(request)
+    _check_settings_origin(request)
+    service = _training_settings_service()
+    now = datetime.now(UTC)
+    profile = await service.get_profile(line_user_id)
+    profile = profile or UserTrainingProfile(
+        user_id=line_user_id, operation_id="planning-settings-default", updated_at=now
+    )
+    current = await service.get_availability(line_user_id)
+    if payload.expected_availability_version != (current.version if current else None):
+        raise HTTPException(
+            status_code=409,
+            detail="稼働可能時間が更新されています。ページを開き直してください。",
+        )
+    resources = await runtime.training_resources.list(line_user_id)
+    resource_ids = {item.id for item in resources}
+    if {env for slot in payload.slots for env in slot.environment_ids} - resource_ids:
+        raise HTTPException(
+            status_code=422, detail="未登録の運動環境は時間枠へ指定できません。"
+        )
+    version = (current.version if current else 0) + 1
+    availability = WeeklyAvailabilityVersion(
+        id=stable_planning_id(
+            "availability", line_user_id, version, payload.operation_id
+        ),
+        user_id=line_user_id,
+        timezone=profile.timezone,
+        version=version,
+        slots=[
+            AvailabilitySlot(
+                id=stable_planning_id(
+                    "availability-slot", line_user_id, version, index
+                ),
+                **slot.model_dump(),
+            )
+            for index, slot in enumerate(payload.slots)
+        ],
+        supersedes_version_id=current.id if current else None,
+        operation_id=payload.operation_id,
+        created_at=now,
+    )
+    try:
+        await service.save_availability(
+            availability, payload.expected_availability_version
+        )
+    except PlanVersionConflict as exc:
+        raise HTTPException(
+            status_code=409,
+            detail="稼働可能時間が更新されています。ページを開き直してください。",
+        ) from exc
+    existing_preferences = await runtime.training_settings_state.list_preferences(
+        line_user_id
+    )
+    submitted_preferences = {item.preference_type: item for item in payload.preferences}
+    unsupported_preferences = (
+        submitted_preferences.keys() - PLANNING_SETTINGS_PREFERENCE_TYPES
+    )
+    if unsupported_preferences:
+        raise HTTPException(
+            status_code=422, detail="未対応の希望条件が含まれています。"
+        )
+    for preference_type in PLANNING_SETTINGS_PREFERENCE_TYPES:
+        item = submitted_preferences.get(preference_type)
+        previous = [
+            preference
+            for preference in existing_preferences
+            if preference.preference_type == preference_type
+        ]
+        latest_previous = (
+            max(previous, key=lambda entry: entry.version) if previous else None
+        )
+        if item is None and latest_previous is None:
+            continue
+        preference = WorkoutPreference(
+            id=stable_planning_id(
+                "preference",
+                line_user_id,
+                preference_type,
+                len(previous) + 1,
+                payload.operation_id,
+            ),
+            user_id=line_user_id,
+            version=max((entry.version for entry in previous), default=0) + 1,
+            preference_type=preference_type,
+            value=item.value if item else latest_previous.value,
+            strength=item.strength if item else latest_previous.strength,
+            source=PreferenceSource.EXPLICIT,
+            confirmation_status=(
+                PreferenceConfirmationStatus.NOT_REQUIRED
+                if item
+                else PreferenceConfirmationStatus.REJECTED
+            ),
+            supersedes_preference_id=latest_previous.id if latest_previous else None,
+            operation_id=payload.operation_id,
+            created_at=now,
+        )
+        await service.save_preference(preference)
+    return {
+        "status": "saved",
+        "availability": availability.model_dump(mode="json"),
+        "preferences": [item.model_dump(mode="json") for item in payload.preferences],
+    }
 
 
 @app.get("/weekly-plan/start")

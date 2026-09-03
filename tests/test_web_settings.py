@@ -406,6 +406,95 @@ def test_settings_api_rejects_unauthenticated_request() -> None:
     assert TestClient(app).get("/settings/profile/api").status_code == 401
 
 
+def test_planning_settings_api_saves_multiple_slots_and_clears_preference() -> None:
+    from app.main import app, runtime
+
+    client = TestClient(app)
+    runtime.messenger.settings_links.clear()
+    opened = client.post(
+        "/tasks/line/events",
+        json={
+            "event_key": "planning-settings-test",
+            "event": {
+                "type": "postback",
+                "source": {"userId": "U-planning-settings"},
+                "postback": {"data": "action=menu&version=1&target=settings"},
+            },
+        },
+    )
+    assert opened.status_code == 200
+    assert client.get(runtime.messenger.settings_links[-1][1]).status_code == 200
+    assert client.get("/settings/planning").status_code == 200
+
+    profile = client.put(
+        "/settings/profile/api",
+        json={
+            "expected_revision": 0,
+            "operation_id": "planning-settings-profile-1",
+            "goals": [],
+            "training_environments": [
+                {"display_name": "インドアバイク", "category": "activity_place"}
+            ],
+        },
+    )
+    assert profile.status_code == 200
+    environment_id = client.get("/settings/profile/api").json()[
+        "training_environments"
+    ][0]["id"]
+    payload = {
+        "expected_availability_version": None,
+        "operation_id": "planning-settings-save-1",
+        "slots": [
+            {
+                "weekday": 0,
+                "start_local_time": "06:00:00",
+                "end_local_time": "07:00:00",
+                "max_workout_minutes": 60,
+                "environment_ids": [],
+                "outdoors_allowed": True,
+                "split_allowed": False,
+            },
+            {
+                "weekday": 0,
+                "start_local_time": "20:00:00",
+                "end_local_time": "21:00:00",
+                "max_workout_minutes": 60,
+                "environment_ids": [environment_id],
+                "outdoors_allowed": False,
+                "split_allowed": False,
+            },
+        ],
+        "preferences": [
+            {
+                "preference_type": "weekend_intensity",
+                "value": {"intensity": "moderate", "weekdays": [5, 6]},
+                "strength": "soft",
+            }
+        ],
+    }
+    saved = client.put("/settings/planning/api", json=payload)
+    assert saved.status_code == 200
+    current = client.get("/settings/planning/api").json()
+    assert len(current["availability"]["slots"]) == 2
+    assert current["availability"]["slots"][1]["outdoors_allowed"] is False
+    assert current["availability"]["slots"][1]["environment_ids"] == [environment_id]
+    assert [item["preference_type"] for item in current["preferences"]] == [
+        "weekend_intensity"
+    ]
+
+    cleared = client.put(
+        "/settings/planning/api",
+        json={
+            **payload,
+            "expected_availability_version": current["availability"]["version"],
+            "operation_id": "planning-settings-save-2",
+            "preferences": [],
+        },
+    )
+    assert cleared.status_code == 200
+    assert client.get("/settings/planning/api").json()["preferences"] == []
+
+
 def test_settings_page_has_mobile_goal_controls() -> None:
     page = (Path(__file__).parents[1] / "app/static/profile-settings.html").read_text()
 
@@ -422,6 +511,15 @@ def test_settings_page_has_mobile_goal_controls() -> None:
     assert "detail:entered" in page
     assert "apiError" in page
     assert "expected_revision:state.revision" in page
+
+
+def test_planning_settings_page_has_availability_controls() -> None:
+    page = (Path(__file__).parents[1] / "app/static/planning-settings.html").read_text()
+
+    assert "時間枠を追加" in page
+    assert "/settings/planning/api" in page
+    assert "屋外可" in page
+    assert "土日は強度を高めに希望する" in page
 
 
 def test_settings_link_is_signed_expires_and_does_not_expose_user_id() -> None:
