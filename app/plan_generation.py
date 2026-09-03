@@ -236,6 +236,11 @@ class WeeklyPlanGenerationService:
                 if template_preferences is not None
                 else None
             ),
+            custom_running_candidates=(
+                template_preferences.custom_running_candidates
+                if template_preferences is not None
+                else []
+            ),
             activities=activity_history[:10],
             confirmed_planned_activity_ids=confirmed_planned_activity_ids,
             performance_profiles=derive_performance_profiles(activity_history, now),
@@ -381,6 +386,7 @@ def build_weekly_plan_input(
     goals: Sequence[Goal],
     environments: Sequence[TrainingEnvironment],
     enabled_workout_template_ids: list[str] | None,
+    custom_running_candidates: list[dict[str, object]],
     activities: Sequence[Activity],
     performance_profiles: Sequence[PerformanceProfile],
     conditions: Sequence[ConditionReport],
@@ -446,6 +452,7 @@ def build_weekly_plan_input(
         else compatible_templates(
             [{"name": item.display_name} for item in environments],
             enabled_workout_template_ids,
+            custom_running_candidates,
         )
     )
     return {

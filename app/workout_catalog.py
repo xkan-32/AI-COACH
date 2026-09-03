@@ -5,6 +5,7 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 CATALOG_VERSION = "workout-catalog-v2"
+RUNNING_ENVIRONMENT_KEYWORDS = ["ラン", "run", "公園", "屋外", "トレッドミル"]
 
 
 class WorkoutTemplate(BaseModel):
@@ -172,6 +173,7 @@ def catalog_payload() -> list[dict[str, Any]]:
 def compatible_templates(
     environments: list[dict[str, str]] | dict[str, str],
     enabled_template_ids: list[str] | None = None,
+    custom_running_candidates: list[dict[str, Any]] | None = None,
 ) -> list[WorkoutTemplate]:
     names = " ".join(
         environments.values()
@@ -179,9 +181,22 @@ def compatible_templates(
         else (item["name"] for item in environments)
     ).lower()
     enabled = set(enabled_template_ids) if enabled_template_ids is not None else None
+    custom_templates = [
+        WorkoutTemplate(
+            id=item["id"],
+            sport="running",
+            title=item["title"],
+            intensity=item["intensity"],
+            required_environment_keywords=RUNNING_ENVIRONMENT_KEYWORDS,
+            outdoors_allowed=None,
+            minimum_minutes=int(item["minimum_minutes"]),
+            description=item["description"],
+        )
+        for item in (custom_running_candidates or [])
+    ]
     return [
         item
-        for item in CATALOG
+        for item in [*CATALOG, *custom_templates]
         if (enabled is None or item.id in enabled)
         and any(keyword in names for keyword in item.required_environment_keywords)
     ]
