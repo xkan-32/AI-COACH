@@ -1,6 +1,7 @@
 import json
 from collections.abc import Sequence
 from datetime import date, datetime, time, timedelta
+from itertools import pairwise
 from typing import Any, Literal, Protocol
 
 from pydantic import BaseModel, Field
@@ -25,8 +26,8 @@ from app.planning import (
     stable_planning_id,
 )
 
-PLAN_PROMPT_VERSION = "weekly-plan-v1"
-PLAN_SAFETY_RULE_VERSION = "weekly-plan-safety-v1"
+PLAN_PROMPT_VERSION = "weekly-plan-v2"
+PLAN_SAFETY_RULE_VERSION = "weekly-plan-safety-v2"
 MAX_WEEKLY_MINUTES = 600
 COLD_START_MAX_WEEKLY_MINUTES = 180
 
@@ -46,7 +47,7 @@ class WeeklyWorkoutOutput(BaseModel):
 
 class WeeklyPlanOutput(BaseModel):
     plan_rationale: str = Field(min_length=1, max_length=1000)
-    workouts: list[WeeklyWorkoutOutput] = Field(min_length=7, max_length=7)
+    workouts: list[WeeklyWorkoutOutput] = Field(min_length=7, max_length=14)
 
 
 class WeeklyPlanGenerator(Protocol):
@@ -368,10 +369,7 @@ def build_weekly_plan_input(
             int(recent_minutes * 1.2),
         ),
         sum(
-            max(
-                (int(slot["max_workout_minutes"]) for slot in day["slots"]),
-                default=0,
-            )
+            sum(int(slot["max_workout_minutes"]) for slot in day["slots"])
             for day in days
         ),
     )
@@ -461,8 +459,11 @@ def build_weekly_plan_input(
             "environment_ids_must_be_listed": True,
         },
         "task": (
-            "Create exactly one conservative workout or rest entry for each date. "
-            "Explain the weekly balance and each daily choice in Japanese."
+            "Create at least one conservative workout or rest entry for each date. "
+            "A date may have multiple workouts only when they use different slots, or "
+            "a single slot explicitly allows splitting. Never combine rest with another "
+            "workout on the same date. Explain the weekly balance and each daily choice "
+            "in Japanese."
         ),
     }
 
@@ -473,13 +474,16 @@ def validate_weekly_plan_output(
     violations: list[str] = []
     expected_dates = plan_input["hard_constraints"]["exact_dates"]
     output_dates = [item.scheduled_date.isoformat() for item in output.workouts]
-    if sorted(output_dates) != sorted(expected_dates) or len(set(output_dates)) != 7:
+    if set(output_dates) != set(expected_dates):
         violations.append("invalid_week_dates")
     days = {item["date"]: item for item in plan_input["availability"]}
     valid_environment_ids = {item["id"] for item in plan_input["environments"]}
     total_minutes = 0
     moderate_dates: list[date] = []
+    slot_workouts: dict[tuple[str, str], list[WeeklyWorkoutOutput]] = {}
+    workouts_by_date: dict[date, list[WeeklyWorkoutOutput]] = {}
     for item in output.workouts:
+        workouts_by_date.setdefault(item.scheduled_date, []).append(item)
         day = days.get(item.scheduled_date.isoformat())
         if day is None:
             continue
@@ -514,8 +518,40 @@ def validate_weekly_plan_output(
             violations.append("unknown_environment")
         if item.outdoors and not slot["outdoors_allowed"]:
             violations.append("outdoors_not_allowed")
+        slot_workouts.setdefault(
+            (item.scheduled_date.isoformat(), item.availability_slot_id), []
+        ).append(item)
         if item.target_intensity == "moderate":
             moderate_dates.append(item.scheduled_date)
+    for scheduled_date, items in workouts_by_date.items():
+        if any(item.target_intensity == "rest" for item in items) and len(items) > 1:
+            violations.append("rest_combined_with_workout")
+        if sum(item.target_intensity != "rest" for item in items) > 2:
+            violations.append("too_many_workouts_per_date")
+    for (scheduled_date, slot_id), items in slot_workouts.items():
+        if len(items) < 2:
+            continue
+        slot = next(
+            slot for slot in days[scheduled_date]["slots"] if slot["id"] == slot_id
+        )
+        if not slot["split_allowed"]:
+            violations.append("multiple_workouts_in_unsplittable_slot")
+            continue
+        if sum(item.target_duration_minutes for item in items) > int(
+            slot["max_workout_minutes"]
+        ):
+            violations.append("combined_duration_exceeds_slot")
+        intervals = sorted(
+            (
+                datetime.combine(date.min, item.scheduled_start_local_time),
+                datetime.combine(date.min, item.scheduled_start_local_time)
+                + timedelta(minutes=item.target_duration_minutes),
+            )
+            for item in items
+            if item.scheduled_start_local_time is not None
+        )
+        if any(later[0] < earlier[1] for earlier, later in pairwise(intervals)):
+            violations.append("overlapping_workouts_in_slot")
     if total_minutes > int(
         plan_input["hard_constraints"]["weekly_duration_limit_minutes"]
     ):
@@ -555,9 +591,33 @@ def fallback_weekly_plan(plan_input: dict[str, Any], reason: str) -> WeeklyPlanO
                 )
             )
             continue
-        slot = slots[0]
-        duration = min(20, int(slot["max_workout_minutes"]), remaining_minutes)
-        if duration <= 0:
+        scheduled = False
+        for slot in slots[:2]:
+            duration = min(20, int(slot["max_workout_minutes"]), remaining_minutes)
+            if duration <= 0:
+                break
+            remaining_minutes -= duration
+            workouts.append(
+                WeeklyWorkoutOutput(
+                    scheduled_date=scheduled_date,
+                    workout_type="easy_mobility",
+                    target_duration_minutes=duration,
+                    target_intensity="easy",
+                    availability_slot_id=slot["id"],
+                    scheduled_start_local_time=time.fromisoformat(
+                        slot["usable_start_local_time"]
+                    ),
+                    environment_ids=[
+                        environment_id
+                        for environment_id in slot["environment_ids"]
+                        if environment_id in valid_environment_ids
+                    ][:1],
+                    outdoors=False,
+                    rationale="利用可能時間内で回復を妨げない軽い運動です。",
+                )
+            )
+            scheduled = True
+        if not scheduled:
             workouts.append(
                 WeeklyWorkoutOutput(
                     scheduled_date=scheduled_date,
@@ -567,27 +627,6 @@ def fallback_weekly_plan(plan_input: dict[str, Any], reason: str) -> WeeklyPlanO
                     rationale="週間の安全な負荷上限を守るため休養します。",
                 )
             )
-            continue
-        remaining_minutes -= duration
-        workouts.append(
-            WeeklyWorkoutOutput(
-                scheduled_date=scheduled_date,
-                workout_type="easy_mobility",
-                target_duration_minutes=duration,
-                target_intensity="easy",
-                availability_slot_id=slot["id"],
-                scheduled_start_local_time=time.fromisoformat(
-                    slot["usable_start_local_time"]
-                ),
-                environment_ids=[
-                    environment_id
-                    for environment_id in slot["environment_ids"]
-                    if environment_id in valid_environment_ids
-                ][:1],
-                outdoors=False,
-                rationale="利用可能時間内で回復を妨げない軽い運動です。",
-            )
-        )
     return WeeklyPlanOutput(
         plan_rationale=(f"安全な週間計画を決定論的に作成しました（{reason}）。"),
         workouts=workouts,

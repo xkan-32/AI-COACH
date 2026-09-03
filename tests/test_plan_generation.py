@@ -75,7 +75,7 @@ def valid_output(duration: int = 20) -> WeeklyPlanOutput:
     )
 
 
-async def build_service(generator):
+async def build_service(generator, *, add_evening_slot: bool = False):
     settings_store = InMemoryTrainingSettingsStore()
     settings = TrainingSettingsService(settings_store, settings_store)
     await settings.save_profile(
@@ -102,7 +102,22 @@ async def build_service(generator):
                 environment_ids=["park"],
             )
             for weekday in range(7)
-        ],
+        ]
+        + (
+            [
+                AvailabilitySlot(
+                    id="slot-0-evening",
+                    weekday=0,
+                    start_local_time=time(20),
+                    end_local_time=time(21),
+                    max_workout_minutes=60,
+                    environment_ids=["indoor"],
+                    outdoors_allowed=False,
+                )
+            ]
+            if add_evening_slot
+            else []
+        ),
         operation_id="availability-op",
         created_at=NOW,
     )
@@ -126,6 +141,15 @@ async def build_service(generator):
             category=TrainingEnvironmentCategory.ACTIVITY_PLACE,
         ),
     )
+    if add_evening_slot:
+        await environments.save(
+            "line-1",
+            TrainingEnvironment(
+                id="indoor",
+                display_name="インドアバイク",
+                category=TrainingEnvironmentCategory.ACTIVITY_PLACE,
+            ),
+        )
     activities = InMemoryActivityStore()
     await activities.save(
         Activity(
@@ -210,6 +234,62 @@ async def test_unsafe_ai_output_is_replaced_by_conservative_fallback() -> None:
     assert "duration_exceeds_slot" in plan.safety_flags
     assert sum(item.target_duration_minutes or 0 for item in workouts) <= 180
     assert all(item.target_intensity in {"rest", "easy"} for item in workouts)
+
+
+async def test_multiple_workouts_on_one_date_use_distinct_slots() -> None:
+    output = valid_output()
+    output.workouts.append(
+        WeeklyWorkoutOutput(
+            scheduled_date=WEEK_START,
+            workout_type="easy_strength",
+            target_duration_minutes=20,
+            target_intensity="easy",
+            availability_slot_id="slot-0-evening",
+            scheduled_start_local_time=time(20),
+            environment_ids=["indoor"],
+            outdoors=False,
+            rationale="夜の屋内時間枠に合わせた補強運動です。",
+        )
+    )
+    service, history = await build_service(
+        CapturingGenerator(output), add_evening_slot=True
+    )
+
+    result = await generate(service)
+
+    workouts = await history.list_workouts(result.plan_id)
+    assert result.used_fallback is False
+    assert len(workouts) == 8
+    assert {
+        item.availability_slot_id
+        for item in workouts
+        if item.scheduled_date == WEEK_START
+    } == {"slot-0", "slot-0-evening"}
+
+
+async def test_multiple_workouts_in_unsplittable_slot_use_fallback() -> None:
+    output = valid_output()
+    output.workouts.append(
+        WeeklyWorkoutOutput(
+            scheduled_date=WEEK_START,
+            workout_type="easy_strength",
+            target_duration_minutes=20,
+            target_intensity="easy",
+            availability_slot_id="slot-0",
+            scheduled_start_local_time=time(6, 30),
+            environment_ids=["park"],
+            outdoors=False,
+            rationale="同じ枠へ重ねた補強運動です。",
+        )
+    )
+    service, history = await build_service(CapturingGenerator(output))
+
+    result = await generate(service)
+
+    plan = await history.get_plan(result.plan_id)
+    assert result.used_fallback is True
+    assert plan is not None
+    assert "multiple_workouts_in_unsplittable_slot" in plan.safety_flags
 
 
 async def test_generator_failure_falls_back_and_retry_is_idempotent() -> None:
