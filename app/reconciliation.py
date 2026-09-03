@@ -19,7 +19,7 @@ from app.planning import (
     create_workout_execution_state,
 )
 
-MATCHER_VERSION = "workout-matcher-v1"
+MATCHER_VERSION = "workout-matcher-v2"
 HIGH_CONFIDENCE_THRESHOLD = 0.70
 MINIMUM_CANDIDATE_THRESHOLD = 0.45
 AMBIGUITY_MARGIN = 0.10
@@ -605,6 +605,7 @@ def _score(
             score += 0.07
             evidence.append("distance_within_50_percent")
 
+    start_is_outside_confirmation_window = False
     if workout.scheduled_start_local_time is None:
         score += 0.10
         evidence.append("scheduled_time_unspecified")
@@ -623,6 +624,14 @@ def _score(
             evidence.append("start_within_180_minutes")
         else:
             evidence.append("start_outside_180_minutes")
+            start_is_outside_confirmation_window = True
+
+    # A matching sport and duration are useful evidence, but they cannot safely
+    # distinguish a morning slot from a distant evening slot. Preserve the
+    # candidate for manual selection instead of silently consuming that workout.
+    if start_is_outside_confirmation_window:
+        score = min(score, HIGH_CONFIDENCE_THRESHOLD - 0.01)
+        evidence.append("scheduled_time_requires_confirmation")
     return MatchCandidate(workout, min(score, 1.0), tuple(evidence))
 
 
