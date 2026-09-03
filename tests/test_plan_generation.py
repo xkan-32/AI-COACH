@@ -245,8 +245,8 @@ async def test_multiple_workouts_on_one_date_use_distinct_slots() -> None:
     output.workouts.append(
         WeeklyWorkoutOutput(
             scheduled_date=WEEK_START,
-                workout_type="自重・全身ベーシック",
-                template_id="bodyweight-full-v1",
+            workout_type="自重・全身ベーシック",
+            template_id="bodyweight-full-v1",
             target_duration_minutes=20,
             target_intensity="easy",
             availability_slot_id="slot-0-evening",
