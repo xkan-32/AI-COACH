@@ -878,21 +878,31 @@ class TrainingSettingsService:
     async def effective_preferences(
         self, user_id: str, now: datetime
     ) -> list[WorkoutPreference]:
-        effective = [
-            item
-            for item in await self._state.list_preferences(user_id)
-            if item.is_effective(now)
-        ]
-        explicit_types = {
-            item.preference_type
-            for item in effective
-            if item.source == PreferenceSource.EXPLICIT
+        preferences = await self._state.list_preferences(user_id)
+        latest_explicit = {
+            preference_type: max(
+                (
+                    item
+                    for item in preferences
+                    if item.source == PreferenceSource.EXPLICIT
+                    and item.preference_type == preference_type
+                ),
+                key=lambda item: item.version,
+            )
+            for preference_type in {
+                item.preference_type
+                for item in preferences
+                if item.source == PreferenceSource.EXPLICIT
+            }
         }
         resolved = [
             item
-            for item in effective
-            if item.source == PreferenceSource.EXPLICIT
-            or item.preference_type not in explicit_types
+            for item in preferences
+            if item.is_effective(now)
+            and (
+                latest_explicit.get(item.preference_type) == item
+                or item.preference_type not in latest_explicit
+            )
         ]
         return sorted(
             resolved,
