@@ -11,6 +11,7 @@ from app.plan_approval import (
     PlanApprovalError,
     PlanApprovalService,
     PlanApprovalState,
+    _firestore_approval_state_payload,
 )
 from app.planning import (
     InMemoryActivePlanPointerStore,
@@ -56,6 +57,22 @@ def make_plan(version: int = 1, owner: str = "line-1", supersedes: str | None = 
         },
         created_at=NOW,
     )
+
+
+def test_firestore_approval_state_payload_serializes_date_values() -> None:
+    payload = _firestore_approval_state_payload(
+        PlanApprovalState(
+            plan_id="plan-1",
+            version=1,
+            week_start=WEEK,
+            user_id="user-1",
+            line_user_id="line-1",
+            expires_at=NOW + timedelta(hours=24),
+        )
+    )
+
+    assert payload["week_start"] == "2026-09-07"
+    assert payload["expires_at"] == "2026-09-03T00:00:00Z"
 
 
 async def setup_service(plan=None):
