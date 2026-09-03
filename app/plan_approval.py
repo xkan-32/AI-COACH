@@ -216,8 +216,7 @@ class FirestorePlanApprovalStateStore:
                 )
                 if current_order > (state.week_start, state.version):
                     raise PlanApprovalError("A newer plan version is already pending")
-            values = state.model_dump(mode="python")
-            values["status"] = state.status.value
+            values = _firestore_approval_state_payload(state)
             pointer = {
                 "plan_id": state.plan_id,
                 "version": state.version,
@@ -571,6 +570,11 @@ def _state_identity(state: PlanApprovalState) -> tuple[object, ...]:
         state.user_id,
         state.line_user_id,
     )
+
+
+def _firestore_approval_state_payload(state: PlanApprovalState) -> dict[str, object]:
+    """Serialize date fields because Firestore does not accept datetime.date."""
+    return state.model_dump(mode="json")
 
 
 def _owner_key(owner: str) -> str:
