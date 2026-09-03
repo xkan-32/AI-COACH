@@ -18,7 +18,7 @@
 
 完了条件: 朝ラン・夜インドアバイク・自宅トレーニングを別slotとして保存し、次回計画入力に含められる。
 
-## Phase 1: 実績からの保守的な基準値（Performance Profile）
+## Phase 1: 実績からの保守的な基準値（Performance Profile、実装済み・shadow）
 
 ### ランニング
 
@@ -37,6 +37,8 @@
 
 - 完了履歴、実施時間、RPE、部位、ユーザーの器具・環境から開始レベルを決める。
 - 初回はフォームを重視する少ないセット・余力を残すRPEで開始し、完了と主観負荷が安定してから回数／セット／難易度を一段ずつ上げる。
+
+`performance-profile-v1`を実装済み。直近84日のActivityからランニングとサイクリングのProfileを計算し、根拠Activity ID、対象期間、信頼度、除外理由、ペース／心拍／時間の幅を週間計画の不変`input_snapshot`へ保存する。Profileは現時点ではshadow入力であり、ユーザー向けの数値処方や医療的な判定には使わない。
 
 完了条件: `PerformanceProfile`に値の根拠Activity ID、対象期間、信頼度、算出versionを保存し、集計の単体テストで外れ値・欠損・cold startを検証する。
 
