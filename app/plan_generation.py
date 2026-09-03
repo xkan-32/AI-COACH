@@ -574,7 +574,9 @@ def validate_weekly_plan_output(
             ):
                 violations.append("invalid_rest_entry")
             continue
-        templates = {template["id"]: template for template in plan_input["workout_catalog"]}
+        templates = {
+            template["id"]: template for template in plan_input["workout_catalog"]
+        }
         template = templates.get(item.template_id or "")
         if template is None:
             violations.append("unknown_workout_template")
@@ -665,7 +667,8 @@ def fallback_weekly_plan(plan_input: dict[str, Any], reason: str) -> WeeklyPlanO
         item["id"]: item["name"] for item in plan_input["environments"]
     }
     templates = [
-        item for item in CATALOG
+        item
+        for item in CATALOG
         if item.id in {template["id"] for template in plan_input["workout_catalog"]}
     ]
     remaining_minutes = int(

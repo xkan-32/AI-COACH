@@ -29,11 +29,56 @@ CATALOG = [
         minimum_minutes=20,
         description="会話できる余裕を残す一定走",
     ),
-    WorkoutTemplate(id="run-recovery-v1", sport="running", title="リカバリーラン", intensity="easy", required_environment_keywords=["ラン", "run", "公園", "屋外", "トレッドミル"], outdoors_allowed=None, minimum_minutes=20, description="疲労を残さない、ごく楽な回復目的のラン"),
-    WorkoutTemplate(id="run-free-v1", sport="running", title="フリーランニング", intensity="easy", required_environment_keywords=["ラン", "run", "公園", "屋外", "トレッドミル"], outdoors_allowed=None, minimum_minutes=20, description="会話できる楽な強度で、気分と体調に合わせて自由に走る"),
-    WorkoutTemplate(id="run-pace-light-v1", sport="running", title="ペース走（控えめ）", intensity="moderate", required_environment_keywords=["ラン", "run", "公園", "屋外", "トレッドミル"], outdoors_allowed=None, minimum_minutes=30, description="ウォームアップとクールダウンを含め、持続可能なやや速いペースを短く保つ"),
-    WorkoutTemplate(id="run-pace-steady-v1", sport="running", title="ペース走（しっかり）", intensity="moderate", required_environment_keywords=["ラン", "run", "公園", "屋外", "トレッドミル"], outdoors_allowed=None, minimum_minutes=40, description="十分な準備・整理運動を含め、過去の実績に見合う一定ペースを保つ"),
-    WorkoutTemplate(id="run-wave-v1", sport="running", title="ウェーブ走", intensity="moderate", required_environment_keywords=["ラン", "run", "公園", "屋外", "トレッドミル"], outdoors_allowed=None, minimum_minutes=35, description="楽な区間とやや速い区間を交互にし、無理なくペース変化へ慣れる"),
+    WorkoutTemplate(
+        id="run-recovery-v1",
+        sport="running",
+        title="リカバリーラン",
+        intensity="easy",
+        required_environment_keywords=["ラン", "run", "公園", "屋外", "トレッドミル"],
+        outdoors_allowed=None,
+        minimum_minutes=20,
+        description="疲労を残さない、ごく楽な回復目的のラン",
+    ),
+    WorkoutTemplate(
+        id="run-free-v1",
+        sport="running",
+        title="フリーランニング",
+        intensity="easy",
+        required_environment_keywords=["ラン", "run", "公園", "屋外", "トレッドミル"],
+        outdoors_allowed=None,
+        minimum_minutes=20,
+        description="会話できる楽な強度で、気分と体調に合わせて自由に走る",
+    ),
+    WorkoutTemplate(
+        id="run-pace-light-v1",
+        sport="running",
+        title="ペース走（控えめ）",
+        intensity="moderate",
+        required_environment_keywords=["ラン", "run", "公園", "屋外", "トレッドミル"],
+        outdoors_allowed=None,
+        minimum_minutes=30,
+        description="ウォームアップとクールダウンを含め、持続可能なやや速いペースを短く保つ",
+    ),
+    WorkoutTemplate(
+        id="run-pace-steady-v1",
+        sport="running",
+        title="ペース走（しっかり）",
+        intensity="moderate",
+        required_environment_keywords=["ラン", "run", "公園", "屋外", "トレッドミル"],
+        outdoors_allowed=None,
+        minimum_minutes=40,
+        description="十分な準備・整理運動を含め、過去の実績に見合う一定ペースを保つ",
+    ),
+    WorkoutTemplate(
+        id="run-wave-v1",
+        sport="running",
+        title="ウェーブ走",
+        intensity="moderate",
+        required_environment_keywords=["ラン", "run", "公園", "屋外", "トレッドミル"],
+        outdoors_allowed=None,
+        minimum_minutes=35,
+        description="楽な区間とやや速い区間を交互にし、無理なくペース変化へ慣れる",
+    ),
     WorkoutTemplate(
         id="bike-endurance-v1",
         sport="cycling",
@@ -44,9 +89,36 @@ CATALOG = [
         minimum_minutes=20,
         description="会話可能な心拍で回す",
     ),
-    WorkoutTemplate(id="bike-recovery-v1", sport="cycling", title="インドアバイク・リカバリー", intensity="easy", required_environment_keywords=["バイク", "bike", "cycling", "ローラー"], outdoors_allowed=False, minimum_minutes=20, description="軽い回転で脚をほぐす回復ライド"),
-    WorkoutTemplate(id="bike-tempo-v1", sport="cycling", title="インドアバイク・テンポ", intensity="moderate", required_environment_keywords=["バイク", "bike", "cycling", "ローラー"], outdoors_allowed=False, minimum_minutes=35, description="ウォームアップ後、持続可能だが会話は短くなる強度を短いブロックで行う"),
-    WorkoutTemplate(id="bike-cadence-v1", sport="cycling", title="インドアバイク・ケイデンス", intensity="easy", required_environment_keywords=["バイク", "bike", "cycling", "ローラー"], outdoors_allowed=False, minimum_minutes=25, description="軽めの負荷で回転数の変化を練習し、フォームと呼吸を整える"),
+    WorkoutTemplate(
+        id="bike-recovery-v1",
+        sport="cycling",
+        title="インドアバイク・リカバリー",
+        intensity="easy",
+        required_environment_keywords=["バイク", "bike", "cycling", "ローラー"],
+        outdoors_allowed=False,
+        minimum_minutes=20,
+        description="軽い回転で脚をほぐす回復ライド",
+    ),
+    WorkoutTemplate(
+        id="bike-tempo-v1",
+        sport="cycling",
+        title="インドアバイク・テンポ",
+        intensity="moderate",
+        required_environment_keywords=["バイク", "bike", "cycling", "ローラー"],
+        outdoors_allowed=False,
+        minimum_minutes=35,
+        description="ウォームアップ後、持続可能だが会話は短くなる強度を短いブロックで行う",
+    ),
+    WorkoutTemplate(
+        id="bike-cadence-v1",
+        sport="cycling",
+        title="インドアバイク・ケイデンス",
+        intensity="easy",
+        required_environment_keywords=["バイク", "bike", "cycling", "ローラー"],
+        outdoors_allowed=False,
+        minimum_minutes=25,
+        description="軽めの負荷で回転数の変化を練習し、フォームと呼吸を整える",
+    ),
     WorkoutTemplate(
         id="bodyweight-full-v1",
         sport="bodyweight",
@@ -57,7 +129,16 @@ CATALOG = [
         minimum_minutes=20,
         description="フォームを優先する全身サーキット",
     ),
-    WorkoutTemplate(id="bodyweight-core-v1", sport="bodyweight", title="自重・体幹ベーシック", intensity="easy", required_environment_keywords=["自宅", "自重", "bodyweight", "ホーム", "ジム"], outdoors_allowed=False, minimum_minutes=15, description="呼吸とフォームを優先する体幹・安定性の基礎トレーニング"),
+    WorkoutTemplate(
+        id="bodyweight-core-v1",
+        sport="bodyweight",
+        title="自重・体幹ベーシック",
+        intensity="easy",
+        required_environment_keywords=["自宅", "自重", "bodyweight", "ホーム", "ジム"],
+        outdoors_allowed=False,
+        minimum_minutes=15,
+        description="呼吸とフォームを優先する体幹・安定性の基礎トレーニング",
+    ),
 ]
 
 
@@ -76,7 +157,8 @@ def compatible_templates(
     ).lower()
     enabled = set(enabled_template_ids) if enabled_template_ids is not None else None
     return [
-        item for item in CATALOG
+        item
+        for item in CATALOG
         if (enabled is None or item.id in enabled)
         and any(keyword in names for keyword in item.required_environment_keywords)
     ]
