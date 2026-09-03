@@ -84,6 +84,7 @@ from app.web_weekly_plan import (
 )
 from app.webhooks import verify_line_signature
 from app.weight import InvalidWeightAction, WeightWorkflow, parse_kilograms
+from app.workout_catalog import compatible_templates
 
 logger = logging.getLogger(__name__)
 
@@ -91,6 +92,7 @@ app = FastAPI(title="AI Training Coach", version="0.3.0")
 runtime = build_runtime(get_settings())
 SETTINGS_COOKIE = "profile_settings_session"
 SETTINGS_PAGE = Path(__file__).parent / "static" / "profile-settings.html"
+PROFILE_SETTINGS_CANDIDATES_SCRIPT = Path(__file__).parent / "static" / "profile-settings-candidates.js"
 PLANNING_SETTINGS_PAGE = Path(__file__).parent / "static" / "planning-settings.html"
 WEEKLY_PLAN_COOKIE = "weekly_plan_session"
 WEEKLY_PLAN_PAGE = Path(__file__).parent / "static" / "weekly-plan.html"
@@ -117,6 +119,9 @@ class ProfileSettingsInput(BaseModel):
     expected_revision: int = Field(ge=0)
     operation_id: str = Field(min_length=1, max_length=64, pattern=r"^[A-Za-z0-9_-]+$")
     target_weight_kg: float | None = None
+    enabled_workout_template_ids: list[str] | None = Field(
+        default=None, max_length=30
+    )
 
     @field_validator("target_weight_kg")
     @classmethod
@@ -396,6 +401,7 @@ def _weekly_plan_generation_service() -> WeeklyPlanGenerationService:
         settings.vertex_model,
         _plan_approval_service(),
         runtime.active_plan_pointers,
+        runtime.profile_settings,
     )
 
 
@@ -684,6 +690,15 @@ async def profile_settings_page(request: Request) -> HTMLResponse:
         '<section><h2>週間計画の条件</h2><p class="hint">曜日・朝夜ごとの時間、利用環境、希望強度を設定できます。</p><a class="add" style="display:block;text-align:center;text-decoration:none" href="/settings/planning">計画条件を設定</a></section></main>',
         1,
     )
+    candidates_section = (
+        '<section><h2>練習メニュー候補</h2>'
+        '<p class="hint">利用できる場所・器具に対応する候補です。選択した候補だけをAIが、体調・目標・活動履歴・利用可能時間に合わせて週間計画へ組み込みます。</p>'
+        '<div class="tiles" id="workout-candidates"></div>'
+        '<p class="hint" id="workout-candidates-empty">まず利用できる運動環境を保存してください。</p>'
+        '</section>'
+    )
+    script = PROFILE_SETTINGS_CANDIDATES_SCRIPT.read_text(encoding="utf-8")
+    page = page.replace("</body>", f"{candidates_section}<script>{script}</script></body>", 1)
     response = HTMLResponse(page)
     response.headers.update(
         {
@@ -723,6 +738,9 @@ async def planning_settings_page(request: Request) -> FileResponse:
 async def get_profile_settings(request: Request) -> dict[str, object]:
     line_user_id = _settings_user(request)
     snapshot = await runtime.profile_settings.get(line_user_id)
+    candidates = compatible_templates(
+        [{"name": item.display_name} for item in snapshot.training_environments]
+    )
     return {
         "goals": [goal.model_dump(mode="json") for goal in snapshot.goals],
         "training_environments": [
@@ -730,6 +748,8 @@ async def get_profile_settings(request: Request) -> dict[str, object]:
         ],
         "revision": snapshot.revision,
         "target_weight_kg": await runtime.weight_targets.get(line_user_id),
+        "enabled_workout_template_ids": snapshot.enabled_workout_template_ids,
+        "workout_candidates": [item.model_dump(mode="json") for item in candidates],
         "options": {
             "goal_types": list(GOAL_TYPES),
             "activity_places": sorted(ACTIVITY_PLACES),
@@ -769,6 +789,21 @@ async def update_profile_settings(
         )
         for index, item in enumerate(payload.training_environments)
     ]
+    compatible_ids = {
+        item.id
+        for item in compatible_templates(
+            [{"name": item.display_name} for item in training_environments]
+        )
+    }
+    if payload.enabled_workout_template_ids is not None:
+        selected_ids = payload.enabled_workout_template_ids
+        if len(selected_ids) != len(set(selected_ids)) or not set(selected_ids).issubset(
+            compatible_ids
+        ):
+            raise HTTPException(
+                status_code=422,
+                detail="利用する運動環境に対応しない練習候補が含まれています。",
+            )
     try:
         revision = await runtime.profile_settings.replace(
             line_user_id,
@@ -776,6 +811,7 @@ async def update_profile_settings(
             training_environments,
             payload.expected_revision,
             payload.operation_id,
+            payload.enabled_workout_template_ids,
         )
     except ProfileSettingsConflict as exc:
         raise HTTPException(

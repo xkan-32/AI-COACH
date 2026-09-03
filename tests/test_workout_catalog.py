@@ -1,4 +1,13 @@
-from app.workout_catalog import prescribe
+from app.workout_catalog import compatible_templates, prescribe
+
+
+def test_compatible_templates_are_limited_to_selected_environment_and_choices() -> None:
+    templates = compatible_templates(
+        [{"name": "屋外ランニング"}, {"name": "インドアバイク"}],
+        ["run-wave-v1", "bike-cadence-v1"],
+    )
+
+    assert [item.id for item in templates] == ["run-wave-v1", "bike-cadence-v1"]
 
 
 def test_prescribes_running_only_for_outdoor_running_environment() -> None:
