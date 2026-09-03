@@ -802,16 +802,23 @@ class BigQueryTrainingSettingsHistoryStore:
         )
 
     async def save_availability(self, availability: WeeklyAvailabilityVersion) -> None:
+        row = availability.model_dump(mode="json")
+        for field in ("slots", "overrides"):
+            row[field] = json.dumps(
+                row[field], ensure_ascii=False, separators=(",", ":")
+            )
         await self._insert(
             "weekly_availability_versions",
-            availability.model_dump(mode="json"),
+            row,
             availability.id,
         )
 
     async def save_preference(self, preference: WorkoutPreference) -> None:
-        await self._insert(
-            "workout_preferences", preference.model_dump(mode="json"), preference.id
+        row = preference.model_dump(mode="json")
+        row["value"] = json.dumps(
+            row["value"], ensure_ascii=False, separators=(",", ":")
         )
+        await self._insert("workout_preferences", row, preference.id)
 
     async def save_dated_request(self, request: DatedWorkoutRequest) -> None:
         await self._insert(

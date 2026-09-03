@@ -8,6 +8,7 @@ from app.domain.models import Goal, GoalPriority
 from app.planning import (
     AvailabilitySlot,
     BigQueryPlanningHistoryStore,
+    BigQueryTrainingSettingsHistoryStore,
     DatedAvailabilityOverride,
     InMemoryActivePlanPointerStore,
     InMemoryPlanningHistoryStore,
@@ -77,6 +78,52 @@ async def test_bigquery_plan_history_serializes_json_columns_for_streaming_inser
     assert json.loads(rows[0]["input_snapshot"]) == {
         "generation_key": "user-1:2026-09-07"
     }
+
+
+async def test_bigquery_training_settings_serializes_json_columns_for_streaming_insert() -> (
+    None
+):
+    client = FakeBigQueryPlanningClient()
+    store = BigQueryTrainingSettingsHistoryStore(client, "project.dataset")
+    availability = WeeklyAvailabilityVersion(
+        id="availability-1",
+        user_id="user-1",
+        timezone="Asia/Tokyo",
+        version=1,
+        slots=[
+            AvailabilitySlot(
+                id="slot-1",
+                weekday=0,
+                start_local_time=time(6),
+                end_local_time=time(7),
+                environment_ids=["indoor-bike"],
+            )
+        ],
+        operation_id="availability-op-1",
+    )
+
+    await store.save_availability(availability)
+
+    table, rows, row_ids = client.calls[0]
+    assert table == "project.dataset.weekly_availability_versions"
+    assert row_ids == [availability.id]
+    assert json.loads(rows[0]["slots"])[0]["environment_ids"] == ["indoor-bike"]
+    assert json.loads(rows[0]["overrides"]) == []
+
+    preference = WorkoutPreference(
+        id="preference-1",
+        user_id="user-1",
+        preference_type="weekend_intensity",
+        value={"intensity": "moderate", "weekdays": [5, 6]},
+        source=PreferenceSource.EXPLICIT,
+        operation_id="preference-op-1",
+    )
+    await store.save_preference(preference)
+
+    table, rows, row_ids = client.calls[1]
+    assert table == "project.dataset.workout_preferences"
+    assert row_ids == [preference.id]
+    assert json.loads(rows[0]["value"])["weekdays"] == [5, 6]
 
 
 async def test_plan_versions_are_immutable_and_supersede_active_version() -> None:

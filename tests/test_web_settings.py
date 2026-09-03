@@ -519,7 +519,9 @@ def test_planning_settings_page_has_availability_controls() -> None:
     assert "時間枠を追加" in page
     assert "/settings/planning/api" in page
     assert "屋外可" in page
-    assert "土日は強度を高めに希望する" in page
+    assert "土日は強度を少し高めにしたい" in page
+    assert 'credentials: "same-origin"' in page
+    assert "viewport-fit=cover" in page
 
 
 def test_settings_link_is_signed_expires_and_does_not_expose_user_id() -> None:
