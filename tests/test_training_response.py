@@ -48,3 +48,19 @@ def test_skipped_and_old_activities_do_not_change_the_signal() -> None:
     assert signal.completed_activity_count == 0
     assert signal.recommended_maximum_moderate_days is None
     assert signal.reason_codes == ["no_recent_response"]
+
+
+def test_confirmed_plan_links_exclude_unplanned_activities_from_load_signal() -> None:
+    signal = derive_training_response_signal(
+        [
+            activity("planned", days_ago=1, intensity="easy"),
+            activity("unplanned-1", days_ago=2, intensity="hard"),
+            activity("unplanned-2", days_ago=3, intensity="hard"),
+        ],
+        NOW,
+        confirmed_planned_activity_ids={"planned"},
+    )
+
+    assert signal.evidence_source == "confirmed_planned_activities"
+    assert signal.evidence_activity_ids == ["planned"]
+    assert signal.recommended_maximum_moderate_days is None

@@ -15,6 +15,7 @@ class TrainingResponseSignal(BaseModel):
     observed_from: datetime | None = None
     observed_until: datetime | None = None
     evidence_activity_ids: list[str] = Field(default_factory=list, max_length=30)
+    evidence_source: str = "all_recent_activities"
     completed_activity_count: int = Field(ge=0)
     hard_rpe_activity_count: int = Field(ge=0)
     recommended_maximum_moderate_days: int | None = Field(default=None, ge=0, le=2)
@@ -22,7 +23,9 @@ class TrainingResponseSignal(BaseModel):
 
 
 def derive_training_response_signal(
-    activities: list[Activity], now: datetime
+    activities: list[Activity],
+    now: datetime,
+    confirmed_planned_activity_ids: set[str] | None = None,
 ) -> TrainingResponseSignal:
     reference = now.astimezone(UTC)
     recent = sorted(
@@ -36,8 +39,18 @@ def derive_training_response_signal(
         ),
         key=lambda item: item.started_at,
     )
+    if confirmed_planned_activity_ids is not None:
+        recent = [item for item in recent if item.id in confirmed_planned_activity_ids]
+        source = "confirmed_planned_activities"
+        reasons = (
+            ["confirmed_planned_activity_reconciliations"]
+            if recent
+            else ["no_confirmed_planned_response"]
+        )
+    else:
+        source = "all_recent_activities"
+        reasons = ["recent_completed_activities"] if recent else ["no_recent_response"]
     hard_rpe = [item for item in recent if item.perceived_intensity == "hard"]
-    reasons = ["recent_completed_activities"] if recent else ["no_recent_response"]
     maximum_moderate_days = None
     if len(hard_rpe) >= 2:
         maximum_moderate_days = 1
@@ -46,6 +59,7 @@ def derive_training_response_signal(
         observed_from=recent[0].started_at.astimezone(UTC) if recent else None,
         observed_until=recent[-1].started_at.astimezone(UTC) if recent else None,
         evidence_activity_ids=[item.id for item in recent],
+        evidence_source=source,
         completed_activity_count=len(recent),
         hard_rpe_activity_count=len(hard_rpe),
         recommended_maximum_moderate_days=maximum_moderate_days,
