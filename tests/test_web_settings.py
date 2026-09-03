@@ -522,6 +522,9 @@ def test_planning_settings_page_has_availability_controls() -> None:
     assert "土日は強度を少し高めにしたい" in page
     assert 'credentials: "same-origin"' in page
     assert "viewport-fit=cover" in page
+    assert "time-grid" in page
+    assert "開始時刻" in page
+    assert "else addSlot()" in page
 
 
 def test_settings_link_is_signed_expires_and_does_not_expose_user_id() -> None:

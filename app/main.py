@@ -685,22 +685,30 @@ async def start_profile_settings(token: str) -> RedirectResponse:
 @app.get("/settings/profile", response_class=HTMLResponse)
 async def profile_settings_page(request: Request) -> HTMLResponse:
     _settings_user(request)
-    page = SETTINGS_PAGE.read_text(encoding="utf-8").replace(
-        "</main>",
-        '<section><h2>週間計画の条件</h2><p class="hint">曜日・朝夜ごとの時間、利用環境、希望強度を設定できます。</p><a class="add" style="display:block;text-align:center;text-decoration:none" href="/settings/planning">計画条件を設定</a></section></main>',
-        1,
-    )
     candidates_section = (
         "<section><h2>練習メニュー候補</h2>"
-        '<p class="hint">利用できる場所・器具に対応する候補です。選択した候補だけをAIが、体調・目標・活動履歴・利用可能時間に合わせて週間計画へ組み込みます。</p>'
-        '<div class="tiles" id="workout-candidates"></div>'
+        '<p class="hint">利用できる場所・器具に対応する候補です。使いたいものだけを選ぶと、AIは体調・目標・活動履歴・利用可能時間に合わせて週間計画を組み立てます。</p>'
+        '<div class="tiles workout-candidate-grid" id="workout-candidates"></div>'
         '<p class="hint" id="workout-candidates-empty">まず利用できる運動環境を保存してください。</p>'
         "</section>"
     )
-    script = PROFILE_SETTINGS_CANDIDATES_SCRIPT.read_text(encoding="utf-8")
-    page = page.replace(
-        "</body>", f"{candidates_section}<script>{script}</script></body>", 1
+    planning_section = (
+        '<section class="planning-link"><h2>週間計画の条件</h2>'
+        '<p class="hint">曜日ごとの運動時間、朝・夜の枠、その時間に使える環境を設定します。</p>'
+        '<a class="add" href="/settings/planning">運動できる時間を設定</a></section>'
     )
+    mobile_styles = (
+        "<style>.planning-link .add{display:block;text-align:center;text-decoration:none;"
+        "margin-top:12px}.workout-candidate-grid .tile span{align-items:flex-start;"
+        "justify-content:flex-start;text-align:left;padding:10px}.workout-candidate-grid small{"
+        "display:block;color:var(--muted);font-size:12px;font-weight:400;margin-top:5px;"
+        "line-height:1.4}@media(max-width:420px){.workout-candidate-grid{grid-template-columns:1fr}}</style>"
+    )
+    page = SETTINGS_PAGE.read_text(encoding="utf-8")
+    page = page.replace("</head>", f"{mobile_styles}</head>", 1)
+    page = page.replace("</main>", f"{planning_section}{candidates_section}</main>", 1)
+    script = PROFILE_SETTINGS_CANDIDATES_SCRIPT.read_text(encoding="utf-8")
+    page = page.replace("</body>", f"<script>{script}</script></body>", 1)
     response = HTMLResponse(page)
     response.headers.update(
         {

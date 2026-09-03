@@ -80,6 +80,29 @@ CATALOG = [
         description="楽な区間とやや速い区間を交互にし、無理なくペース変化へ慣れる",
     ),
     WorkoutTemplate(
+        id="run-interval-400-v1",
+        sport="running",
+        title="400mインターバル",
+        intensity="moderate",
+        required_environment_keywords=["ラン", "run", "公園", "屋外", "トレッドミル"],
+        outdoors_allowed=None,
+        minimum_minutes=35,
+        description=(
+            "十分な準備・整理運動を含め、400mの高負荷走と60秒の休憩を"
+            "交互に行う。回数とペースは過去の実績・体調・利用時間に合わせて抑える"
+        ),
+    ),
+    WorkoutTemplate(
+        id="run-lsd-v1",
+        sport="running",
+        title="LSD（ロングスローディスタンス）",
+        intensity="easy",
+        required_environment_keywords=["ラン", "run", "公園", "屋外", "トレッドミル"],
+        outdoors_allowed=None,
+        minimum_minutes=60,
+        description="会話できる余裕を保つゆっくりした長めのラン。距離より時間と継続を優先する",
+    ),
+    WorkoutTemplate(
         id="bike-endurance-v1",
         sport="cycling",
         title="インドアバイク有酸素",
