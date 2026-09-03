@@ -264,6 +264,24 @@ async def test_non_approval_decisions_leave_pointer_unchanged(
     assert await pointers.get(plan.user_id, WEEK) is None
 
 
+async def test_latest_state_remains_available_after_rejection() -> None:
+    service, _, _, _, signer, plan, _, approval = await setup_service()
+
+    await service.decide(
+        plan=plan,
+        line_user_id="line-1",
+        decision="reject",
+        action_token=signer.create(
+            plan.id, plan.version, "line-1", "reject", approval.expires_at
+        ),
+    )
+
+    latest = await service.latest_state_for_line("line-1")
+    assert latest is not None
+    assert latest.version == 1
+    assert latest.status.value == "rejected"
+
+
 async def test_owner_and_stale_version_are_rejected() -> None:
     service, states, history, _, signer, first, _, approval = await setup_service()
     owner_token = signer.create(

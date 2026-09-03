@@ -55,6 +55,9 @@ class PlanApprovalStateStore(Protocol):
     async def get_current(
         self, user_id: str | None, line_user_id: str
     ) -> PlanApprovalState | None: ...
+    async def get_latest_for_line(
+        self, line_user_id: str
+    ) -> PlanApprovalState | None: ...
     async def present(
         self, plan_id: str, version: int, line_user_id: str, now: datetime
     ) -> bool: ...
@@ -110,6 +113,10 @@ class InMemoryPlanApprovalStateStore:
         ):
             return None
         return state
+
+    async def get_latest_for_line(self, line_user_id: str) -> PlanApprovalState | None:
+        pointer = self.pending_by_line.get(line_user_id)
+        return self.items.get(pointer[0]) if pointer is not None else None
 
     async def present(
         self, plan_id: str, version: int, line_user_id: str, now: datetime
@@ -268,6 +275,19 @@ class FirestorePlanApprovalStateStore:
         if state.status not in {PlanApprovalStatus.DRAFT, PlanApprovalStatus.PENDING}:
             return None
         return state
+
+    async def get_latest_for_line(self, line_user_id: str) -> PlanApprovalState | None:
+        pointer = await self._line_pointer(line_user_id).get()
+        if not pointer.exists:
+            return None
+        values = pointer.to_dict()
+        if values.get("line_user_id") != line_user_id:
+            return None
+        snapshot = await self._state(str(values.get("plan_id", ""))).get()
+        if not snapshot.exists:
+            return None
+        state = PlanApprovalState.model_validate(snapshot.to_dict())
+        return state if state.line_user_id == line_user_id else None
 
     async def present(
         self, plan_id: str, version: int, line_user_id: str, now: datetime
@@ -462,6 +482,11 @@ class PlanApprovalService:
         ):
             raise PlanApprovalError("Pending plan target mismatch")
         return plan
+
+    async def latest_state_for_line(
+        self, line_user_id: str
+    ) -> PlanApprovalState | None:
+        return await self._states.get_latest_for_line(line_user_id)
 
     async def present(self, plan: TrainingPlanVersion) -> PlanApprovalState:
         if not plan.line_user_id:

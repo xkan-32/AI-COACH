@@ -410,8 +410,15 @@ async def _generate_initial_plan_for_line(line_user_id: str):
             updated_at=now,
         )
     week_start = profile.local_week_start(now)
+    latest = await _plan_approval_service().latest_state_for_line(line_user_id)
+    plan_version = (
+        latest.version + 1
+        if latest is not None and latest.week_start == week_start
+        else 1
+    )
     event_key = (
-        f"initial_weekly_plan:{line_user_id}:{week_start.isoformat()}:{profile.version}"
+        f"initial_weekly_plan:{line_user_id}:{week_start.isoformat()}:"
+        f"{profile.version}:v{plan_version}"
     )
     if not await runtime.events.reserve("weekly_plan_generation", event_key):
         raise PlanApprovalError(
@@ -422,10 +429,17 @@ async def _generate_initial_plan_for_line(line_user_id: str):
             user_id=line_user_id,
             line_user_id=line_user_id,
             week_start=week_start,
-            plan_version=1,
-            generation_reason="initial_menu_request",
-            input_revision=f"profile-{profile.version}",
-            operation_id=f"initial-menu-{week_start.isoformat()}-v{profile.version}",
+            plan_version=plan_version,
+            generation_reason=(
+                "initial_menu_reproposal"
+                if plan_version > 1
+                else "initial_menu_request"
+            ),
+            input_revision=f"profile-{profile.version}-plan-{plan_version}",
+            operation_id=(
+                f"initial-menu-{week_start.isoformat()}-profile-{profile.version}"
+                f"-plan-{plan_version}"
+            ),
             now=now,
         )
     except BaseException:
