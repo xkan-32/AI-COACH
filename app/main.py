@@ -95,6 +95,9 @@ SETTINGS_PAGE = Path(__file__).parent / "static" / "profile-settings.html"
 PROFILE_SETTINGS_CANDIDATES_SCRIPT = (
     Path(__file__).parent / "static" / "profile-settings-candidates.js"
 )
+PROFILE_SETTINGS_CUSTOM_CANDIDATES_SCRIPT = (
+    Path(__file__).parent / "static" / "profile-settings-custom-candidates.js"
+)
 PLANNING_SETTINGS_PAGE = Path(__file__).parent / "static" / "planning-settings.html"
 WEEKLY_PLAN_COOKIE = "weekly_plan_session"
 WEEKLY_PLAN_PAGE = Path(__file__).parent / "static" / "weekly-plan.html"
@@ -115,6 +118,14 @@ class EnvironmentInput(BaseModel):
     detail: str | None = Field(default=None, max_length=200)
 
 
+class CustomRunningCandidateInput(BaseModel):
+    id: str | None = None
+    title: str = Field(min_length=1, max_length=80)
+    description: str = Field(min_length=1, max_length=300)
+    intensity: Literal["easy", "moderate"] = "easy"
+    minimum_minutes: int = Field(default=30, ge=10, le=240)
+
+
 class ProfileSettingsInput(BaseModel):
     goals: list[GoalInput] = Field(max_length=MAX_ITEMS)
     training_environments: list[EnvironmentInput] = Field(max_length=MAX_ITEMS)
@@ -122,6 +133,9 @@ class ProfileSettingsInput(BaseModel):
     operation_id: str = Field(min_length=1, max_length=64, pattern=r"^[A-Za-z0-9_-]+$")
     target_weight_kg: float | None = None
     enabled_workout_template_ids: list[str] | None = Field(default=None, max_length=30)
+    custom_running_candidates: list[CustomRunningCandidateInput] = Field(
+        default_factory=list, max_length=20
+    )
 
     @field_validator("target_weight_kg")
     @classmethod
@@ -685,21 +699,39 @@ async def start_profile_settings(token: str) -> RedirectResponse:
 @app.get("/settings/profile", response_class=HTMLResponse)
 async def profile_settings_page(request: Request) -> HTMLResponse:
     _settings_user(request)
-    page = SETTINGS_PAGE.read_text(encoding="utf-8").replace(
-        "</main>",
-        '<section><h2>週間計画の条件</h2><p class="hint">曜日・朝夜ごとの時間、利用環境、希望強度を設定できます。</p><a class="add" style="display:block;text-align:center;text-decoration:none" href="/settings/planning">計画条件を設定</a></section></main>',
-        1,
-    )
     candidates_section = (
         "<section><h2>練習メニュー候補</h2>"
-        '<p class="hint">利用できる場所・器具に対応する候補です。選択した候補だけをAIが、体調・目標・活動履歴・利用可能時間に合わせて週間計画へ組み込みます。</p>'
-        '<div class="tiles" id="workout-candidates"></div>'
+        '<p class="hint">利用できる場所・器具に対応する候補です。使いたいものだけを選ぶと、AIは体調・目標・活動履歴・利用可能時間に合わせて週間計画を組み立てます。</p>'
+        '<div class="tiles workout-candidate-grid" id="workout-candidates"></div>'
         '<p class="hint" id="workout-candidates-empty">まず利用できる運動環境を保存してください。</p>'
+        '<div id="custom-running-candidates"></div>'
+        '<button class="add" id="add-running-candidate" type="button">＋ ランニング候補を追加</button>'
+        '<button class="add" id="reset-workout-candidates" type="button">標準候補に戻す</button>'
         "</section>"
     )
+    planning_section = (
+        '<section class="planning-link"><h2>週間計画の条件</h2>'
+        '<p class="hint">曜日ごとの運動時間、朝・夜の枠、その時間に使える環境を設定します。</p>'
+        '<a class="add" href="/settings/planning">運動できる時間を設定</a></section>'
+    )
+    mobile_styles = (
+        "<style>.planning-link .add{display:block;text-align:center;text-decoration:none;"
+        "margin-top:12px}.workout-candidate-grid .tile span{align-items:flex-start;"
+        "justify-content:flex-start;text-align:left;padding:10px}.workout-candidate-grid small{"
+        "display:block;color:var(--muted);font-size:12px;font-weight:400;margin-top:5px;"
+        "line-height:1.4}@media(max-width:420px){.workout-candidate-grid{grid-template-columns:1fr}}</style>"
+    )
+    page = SETTINGS_PAGE.read_text(encoding="utf-8")
+    page = page.replace("</head>", f"{mobile_styles}</head>", 1)
+    page = page.replace("</main>", f"{planning_section}{candidates_section}</main>", 1)
     script = PROFILE_SETTINGS_CANDIDATES_SCRIPT.read_text(encoding="utf-8")
+    custom_script = PROFILE_SETTINGS_CUSTOM_CANDIDATES_SCRIPT.read_text(
+        encoding="utf-8"
+    )
     page = page.replace(
-        "</body>", f"{candidates_section}<script>{script}</script></body>", 1
+        "</body>",
+        f"<script>{script}</script><script>{custom_script}</script></body>",
+        1,
     )
     response = HTMLResponse(page)
     response.headers.update(
@@ -741,7 +773,8 @@ async def get_profile_settings(request: Request) -> dict[str, object]:
     line_user_id = _settings_user(request)
     snapshot = await runtime.profile_settings.get(line_user_id)
     candidates = compatible_templates(
-        [{"name": item.display_name} for item in snapshot.training_environments]
+        [{"name": item.display_name} for item in snapshot.training_environments],
+        custom_running_candidates=snapshot.custom_running_candidates,
     )
     return {
         "goals": [goal.model_dump(mode="json") for goal in snapshot.goals],
@@ -752,6 +785,7 @@ async def get_profile_settings(request: Request) -> dict[str, object]:
         "target_weight_kg": await runtime.weight_targets.get(line_user_id),
         "enabled_workout_template_ids": snapshot.enabled_workout_template_ids,
         "workout_candidates": [item.model_dump(mode="json") for item in candidates],
+        "custom_running_candidates": snapshot.custom_running_candidates,
         "options": {
             "goal_types": list(GOAL_TYPES),
             "activity_places": sorted(ACTIVITY_PLACES),
@@ -791,14 +825,61 @@ async def update_profile_settings(
         )
         for index, item in enumerate(payload.training_environments)
     ]
+    current_snapshot = await runtime.profile_settings.get(line_user_id)
+    current_custom_ids = {
+        str(item["id"]) for item in current_snapshot.custom_running_candidates
+    }
+    custom_running_candidates = [
+        {
+            "id": item.id
+            if item.id in current_custom_ids
+            else profile_settings_item_id(
+                line_user_id, payload.operation_id, "custom-running-candidate", index
+            ),
+            "title": item.title.strip(),
+            "description": item.description.strip(),
+            "intensity": item.intensity,
+            "minimum_minutes": item.minimum_minutes,
+        }
+        for index, item in enumerate(payload.custom_running_candidates)
+    ]
+    if any(
+        item.id is not None and item.id not in current_custom_ids
+        for item in payload.custom_running_candidates
+    ):
+        raise HTTPException(
+            status_code=422,
+            detail="練習候補が更新されています。ページを開き直してください。",
+        )
+    if len({item["title"] for item in custom_running_candidates}) != len(
+        custom_running_candidates
+    ):
+        raise HTTPException(
+            status_code=422, detail="同じ名前のランニング候補は登録できません。"
+        )
+    enabled_template_ids = payload.enabled_workout_template_ids
+    if enabled_template_ids is not None:
+        enabled_template_ids = [
+            *enabled_template_ids,
+            *[
+                item["id"]
+                for item, supplied in zip(
+                    custom_running_candidates,
+                    payload.custom_running_candidates,
+                    strict=True,
+                )
+                if supplied.id is None
+            ],
+        ]
     compatible_ids = {
         item.id
         for item in compatible_templates(
-            [{"name": item.display_name} for item in training_environments]
+            [{"name": item.display_name} for item in training_environments],
+            custom_running_candidates=custom_running_candidates,
         )
     }
-    if payload.enabled_workout_template_ids is not None:
-        selected_ids = payload.enabled_workout_template_ids
+    if enabled_template_ids is not None:
+        selected_ids = enabled_template_ids
         if len(selected_ids) != len(set(selected_ids)) or not set(
             selected_ids
         ).issubset(compatible_ids):
@@ -813,7 +894,8 @@ async def update_profile_settings(
             training_environments,
             payload.expected_revision,
             payload.operation_id,
-            payload.enabled_workout_template_ids,
+            enabled_template_ids,
+            custom_running_candidates,
         )
     except ProfileSettingsConflict as exc:
         raise HTTPException(

@@ -69,6 +69,7 @@ def profile_settings_fingerprint(
     goals: list[Goal],
     training_environments: list[TrainingEnvironment],
     enabled_workout_template_ids: list[str] | None = None,
+    custom_running_candidates: list[dict[str, object]] | None = None,
 ) -> str:
     payload = {
         "goals": [item.model_dump(mode="json") for item in goals],
@@ -76,6 +77,7 @@ def profile_settings_fingerprint(
             item.model_dump(mode="json") for item in training_environments
         ],
         "enabled_workout_template_ids": enabled_workout_template_ids,
+        "custom_running_candidates": custom_running_candidates or [],
     }
     encoded = json.dumps(
         payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")
@@ -120,6 +122,7 @@ class ProfileSettingsSnapshot:
     training_environments: list[TrainingEnvironment]
     revision: int
     enabled_workout_template_ids: list[str] | None = None
+    custom_running_candidates: list[dict[str, object]] = field(default_factory=list)
 
 
 class ProfileSettingsConflict(ValueError):
@@ -137,6 +140,7 @@ class ProfileSettingsStore(Protocol):
         expected_revision: int,
         operation_id: str,
         enabled_workout_template_ids: list[str] | None = None,
+        custom_running_candidates: list[dict[str, object]] | None = None,
     ) -> int: ...
 
 
@@ -250,6 +254,7 @@ class InMemoryProfileSettingsStore:
         self._revisions: dict[str, int] = {}
         self._operations: dict[str, tuple[str, str]] = {}
         self._enabled_template_ids: dict[str, list[str] | None] = {}
+        self._custom_running_candidates: dict[str, list[dict[str, object]]] = {}
 
     async def get(self, line_user_id: str) -> ProfileSettingsSnapshot:
         return ProfileSettingsSnapshot(
@@ -257,6 +262,9 @@ class InMemoryProfileSettingsStore:
             training_environments=await self._training_environments.list(line_user_id),
             revision=self._revisions.get(line_user_id, 0),
             enabled_workout_template_ids=self._enabled_template_ids.get(line_user_id),
+            custom_running_candidates=deepcopy(
+                self._custom_running_candidates.get(line_user_id, [])
+            ),
         )
 
     async def replace(
@@ -267,10 +275,14 @@ class InMemoryProfileSettingsStore:
         expected_revision: int,
         operation_id: str,
         enabled_workout_template_ids: list[str] | None = None,
+        custom_running_candidates: list[dict[str, object]] | None = None,
     ) -> int:
         revision = self._revisions.get(line_user_id, 0)
         fingerprint = profile_settings_fingerprint(
-            goals, training_environments, enabled_workout_template_ids
+            goals,
+            training_environments,
+            enabled_workout_template_ids,
+            custom_running_candidates,
         )
         previous_operation = self._operations.get(line_user_id)
         if previous_operation and previous_operation[0] == operation_id:
@@ -335,6 +347,9 @@ class InMemoryProfileSettingsStore:
         revision += 1
         self._revisions[line_user_id] = revision
         self._enabled_template_ids[line_user_id] = enabled_workout_template_ids
+        self._custom_running_candidates[line_user_id] = deepcopy(
+            custom_running_candidates or []
+        )
         self._operations[line_user_id] = operation_id, fingerprint
         return revision
 
@@ -563,6 +578,7 @@ class FirestoreProfileSettingsStore:
                 training_environments,
                 revision,
                 state_values.get("enabled_workout_template_ids"),
+                state_values.get("custom_running_candidates", []),
             )
 
         return await read_once(transaction)
@@ -575,6 +591,7 @@ class FirestoreProfileSettingsStore:
         expected_revision: int,
         operation_id: str,
         enabled_workout_template_ids: list[str] | None = None,
+        custom_running_candidates: list[dict[str, object]] | None = None,
     ) -> int:
         from google.cloud.firestore_v1.async_transaction import async_transactional
 
@@ -590,7 +607,10 @@ class FirestoreProfileSettingsStore:
             state_values = state.to_dict() if state.exists else {}
             revision = int(state_values.get("revision", 0))
             fingerprint = profile_settings_fingerprint(
-                goals, training_environments, enabled_workout_template_ids
+                goals,
+                training_environments,
+                enabled_workout_template_ids,
+                custom_running_candidates,
             )
             if state_values.get("last_operation_id") == operation_id:
                 if state_values.get("last_operation_fingerprint") != fingerprint:
@@ -679,6 +699,7 @@ class FirestoreProfileSettingsStore:
                     "last_operation_id": operation_id,
                     "last_operation_fingerprint": fingerprint,
                     "enabled_workout_template_ids": enabled_workout_template_ids,
+                    "custom_running_candidates": custom_running_candidates or [],
                     "updated_at": datetime.now(UTC),
                 },
             )

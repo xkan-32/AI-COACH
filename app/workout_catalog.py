@@ -5,6 +5,7 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 CATALOG_VERSION = "workout-catalog-v2"
+RUNNING_ENVIRONMENT_KEYWORDS = ["ラン", "run", "公園", "屋外", "トレッドミル"]
 
 
 class WorkoutTemplate(BaseModel):
@@ -80,6 +81,29 @@ CATALOG = [
         description="楽な区間とやや速い区間を交互にし、無理なくペース変化へ慣れる",
     ),
     WorkoutTemplate(
+        id="run-interval-400-v1",
+        sport="running",
+        title="400mインターバル",
+        intensity="moderate",
+        required_environment_keywords=["ラン", "run", "公園", "屋外", "トレッドミル"],
+        outdoors_allowed=None,
+        minimum_minutes=35,
+        description=(
+            "十分な準備・整理運動を含め、400mの高負荷走と60秒の休憩を"
+            "交互に行う。回数とペースは過去の実績・体調・利用時間に合わせて抑える"
+        ),
+    ),
+    WorkoutTemplate(
+        id="run-lsd-v1",
+        sport="running",
+        title="LSD（ロングスローディスタンス）",
+        intensity="easy",
+        required_environment_keywords=["ラン", "run", "公園", "屋外", "トレッドミル"],
+        outdoors_allowed=None,
+        minimum_minutes=60,
+        description="会話できる余裕を保つゆっくりした長めのラン。距離より時間と継続を優先する",
+    ),
+    WorkoutTemplate(
         id="bike-endurance-v1",
         sport="cycling",
         title="インドアバイク有酸素",
@@ -149,6 +173,7 @@ def catalog_payload() -> list[dict[str, Any]]:
 def compatible_templates(
     environments: list[dict[str, str]] | dict[str, str],
     enabled_template_ids: list[str] | None = None,
+    custom_running_candidates: list[dict[str, Any]] | None = None,
 ) -> list[WorkoutTemplate]:
     names = " ".join(
         environments.values()
@@ -156,9 +181,22 @@ def compatible_templates(
         else (item["name"] for item in environments)
     ).lower()
     enabled = set(enabled_template_ids) if enabled_template_ids is not None else None
+    custom_templates = [
+        WorkoutTemplate(
+            id=item["id"],
+            sport="running",
+            title=item["title"],
+            intensity=item["intensity"],
+            required_environment_keywords=RUNNING_ENVIRONMENT_KEYWORDS,
+            outdoors_allowed=None,
+            minimum_minutes=int(item["minimum_minutes"]),
+            description=item["description"],
+        )
+        for item in (custom_running_candidates or [])
+    ]
     return [
         item
-        for item in CATALOG
+        for item in [*CATALOG, *custom_templates]
         if (enabled is None or item.id in enabled)
         and any(keyword in names for keyword in item.required_environment_keywords)
     ]
