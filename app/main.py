@@ -395,6 +395,7 @@ def _weekly_plan_generation_service() -> WeeklyPlanGenerationService:
         runtime.condition_reports,
         settings.vertex_model,
         _plan_approval_service(),
+        runtime.active_plan_pointers,
     )
 
 

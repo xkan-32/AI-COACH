@@ -9,10 +9,12 @@ from pydantic import BaseModel, Field
 from app.domain.models import Activity, ConditionReport, Goal, TrainingEnvironment
 from app.performance_profile import PerformanceProfile, derive_performance_profiles
 from app.planning import (
+    ActivePlanPointerStore,
     AvailabilitySlot,
     DatedWorkoutRequest,
     PlanningHistoryStore,
     PreferenceSource,
+    ReconciliationStatus,
     SafetyGateStatus,
     TrainingPlanStatus,
     TrainingSettingsService,
@@ -136,6 +138,7 @@ class WeeklyPlanGenerationService:
         conditions: ConditionHistoryReader,
         model_name: str,
         draft_registrar: DraftPlanRegistrar | None = None,
+        active_plans: ActivePlanPointerStore | None = None,
     ) -> None:
         self._generator = generator
         self._history = history
@@ -146,6 +149,7 @@ class WeeklyPlanGenerationService:
         self._conditions = conditions
         self._model_name = model_name
         self._draft_registrar = draft_registrar
+        self._active_plans = active_plans
 
     async def generate_shadow_plan(
         self,
@@ -206,6 +210,9 @@ class WeeklyPlanGenerationService:
             conditions = await self._conditions.list_recent(
                 profile.provider_athlete_id, limit=10
             )
+        confirmed_planned_activity_ids = await self._previous_plan_activity_ids(
+            user_id, week_start
+        )
         plan_input = build_weekly_plan_input(
             profile=profile,
             availability=availability,
@@ -214,6 +221,7 @@ class WeeklyPlanGenerationService:
             goals=goals,
             environments=environments,
             activities=activity_history[:10],
+            confirmed_planned_activity_ids=confirmed_planned_activity_ids,
             performance_profiles=derive_performance_profiles(activity_history, now),
             conditions=conditions,
             week_start=week_start,
@@ -314,6 +322,25 @@ class WeeklyPlanGenerationService:
             input_digest=planning_input_digest(plan_input),
         )
 
+    async def _previous_plan_activity_ids(
+        self, user_id: str, week_start: date
+    ) -> set[str] | None:
+        if self._active_plans is None:
+            return None
+        previous_plan_id = await self._active_plans.get(
+            user_id, week_start - timedelta(days=7)
+        )
+        if previous_plan_id is None:
+            return set()
+        return {
+            item.activity_id
+            for item in await self._history.list_plan_reconciliations(previous_plan_id)
+            if item.confirmed
+            and item.status
+            in {ReconciliationStatus.MATCHED, ReconciliationStatus.PARTIAL}
+            and item.activity_id is not None
+        }
+
 
 def _split_allowed(
     availability: WeeklyAvailabilityVersion | None,
@@ -345,6 +372,7 @@ def build_weekly_plan_input(
     generation_reason: str,
     input_revision: str,
     now: datetime,
+    confirmed_planned_activity_ids: set[str] | None = None,
 ) -> dict[str, Any]:
     days = []
     for offset in range(7):
@@ -364,7 +392,9 @@ def build_weekly_plan_input(
         for item in activities
         if now - timedelta(days=7) <= item.started_at <= now
     )
-    training_response = derive_training_response_signal(list(activities), now)
+    training_response = derive_training_response_signal(
+        list(activities), now, confirmed_planned_activity_ids
+    )
     latest_condition = (
         max(conditions, key=lambda item: item.reported_at).level.value
         if conditions
