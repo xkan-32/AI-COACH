@@ -1159,6 +1159,13 @@ class BigQueryPlanningHistoryStore:
 
     async def save_plan(self, plan: TrainingPlanVersion) -> None:
         row = plan.model_dump(mode="json")
+        # BigQuery's streaming insert API expects values for JSON columns as
+        # JSON-formatted strings, unlike the Python objects returned by the
+        # query API. Keep the conversion at this persistence boundary.
+        for field in ("goal_snapshot", "input_snapshot"):
+            row[field] = json.dumps(
+                row[field], ensure_ascii=False, separators=(",", ":")
+            )
         await self._insert("training_plan_versions", row, plan.id)
 
     async def get_plan(self, plan_id: str) -> TrainingPlanVersion | None:
@@ -1181,6 +1188,9 @@ class BigQueryPlanningHistoryStore:
             values["user_id"] = values.get("athlete_id")
         if not values.get("status"):
             values["status"] = TrainingPlanStatus.ACTIVE.value
+        for field in ("goal_snapshot", "input_snapshot"):
+            if isinstance(values.get(field), str):
+                values[field] = json.loads(values[field])
         return TrainingPlanVersion.model_validate(values)
 
     async def list_workouts(self, plan_id: str) -> list[PlannedWorkout]:
@@ -1407,7 +1417,7 @@ class BigQueryPlanningHistoryStore:
             row_ids=[row_id],
         )
         if errors:
-            raise RuntimeError(f"BigQuery insert failed for {table}")
+            raise RuntimeError(f"BigQuery insert failed for {table}: {errors!r}")
 
 
 class PlanningService:
