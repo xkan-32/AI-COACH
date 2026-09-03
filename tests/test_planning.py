@@ -1,3 +1,4 @@
+import json
 from datetime import UTC, date, datetime, time, timedelta
 
 import pytest
@@ -6,6 +7,7 @@ from pydantic import ValidationError
 from app.domain.models import Goal, GoalPriority
 from app.planning import (
     AvailabilitySlot,
+    BigQueryPlanningHistoryStore,
     DatedAvailabilityOverride,
     InMemoryActivePlanPointerStore,
     InMemoryPlanningHistoryStore,
@@ -38,6 +40,43 @@ def goal(target: str = "10kmを60分以内") -> Goal:
         target=target,
         priority=GoalPriority.PRIMARY,
     )
+
+
+class FakeBigQueryPlanningClient:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, list[dict], list[str]]] = []
+
+    def insert_rows_json(
+        self, table: str, rows: list[dict], row_ids: list[str]
+    ) -> list:
+        self.calls.append((table, rows, row_ids))
+        return []
+
+
+async def test_bigquery_plan_history_serializes_json_columns_for_streaming_insert() -> (
+    None
+):
+    client = FakeBigQueryPlanningClient()
+    store = BigQueryPlanningHistoryStore(client, "project.dataset")
+    plan = create_plan_version(
+        "user-1",
+        "line-1",
+        date(2026, 9, 7),
+        1,
+        [goal()],
+        "initial_menu_request",
+        input_snapshot={"generation_key": "user-1:2026-09-07"},
+    )
+
+    await store.save_plan(plan)
+
+    table, rows, row_ids = client.calls[0]
+    assert table == "project.dataset.training_plan_versions"
+    assert row_ids == [plan.id]
+    assert json.loads(rows[0]["goal_snapshot"])[0]["target"] == "10kmを60分以内"
+    assert json.loads(rows[0]["input_snapshot"]) == {
+        "generation_key": "user-1:2026-09-07"
+    }
 
 
 async def test_plan_versions_are_immutable_and_supersede_active_version() -> None:
