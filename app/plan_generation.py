@@ -29,7 +29,7 @@ from app.planning import (
     stable_planning_id,
 )
 from app.training_response import derive_training_response_signal
-from app.workout_catalog import CATALOG, catalog_payload, prescribe
+from app.workout_catalog import CATALOG, compatible_templates, prescribe
 
 PLAN_PROMPT_VERSION = "weekly-plan-v3"
 PLAN_SAFETY_RULE_VERSION = "weekly-plan-safety-v2"
@@ -66,6 +66,10 @@ class GoalReader(Protocol):
 
 class TrainingEnvironmentReader(Protocol):
     async def list(self, line_user_id: str) -> list[TrainingEnvironment]: ...
+
+
+class WorkoutTemplatePreferenceReader(Protocol):
+    async def get(self, line_user_id: str) -> Any: ...
 
 
 class ActivityHistoryReader(Protocol):
@@ -139,6 +143,7 @@ class WeeklyPlanGenerationService:
         model_name: str,
         draft_registrar: DraftPlanRegistrar | None = None,
         active_plans: ActivePlanPointerStore | None = None,
+        workout_template_preferences: WorkoutTemplatePreferenceReader | None = None,
     ) -> None:
         self._generator = generator
         self._history = history
@@ -150,6 +155,7 @@ class WeeklyPlanGenerationService:
         self._model_name = model_name
         self._draft_registrar = draft_registrar
         self._active_plans = active_plans
+        self._workout_template_preferences = workout_template_preferences
 
     async def generate_shadow_plan(
         self,
@@ -201,6 +207,11 @@ class WeeklyPlanGenerationService:
         )
         goals = await self._goals.list(line_user_id)
         environments = await self._environments.list(line_user_id)
+        template_preferences = (
+            await self._workout_template_preferences.get(line_user_id)
+            if self._workout_template_preferences is not None
+            else None
+        )
         activity_history: list[Activity] = []
         conditions: list[ConditionReport] = []
         if profile.provider_athlete_id:
@@ -220,6 +231,11 @@ class WeeklyPlanGenerationService:
             dated_requests=dated_requests,
             goals=goals,
             environments=environments,
+            enabled_workout_template_ids=(
+                template_preferences.enabled_workout_template_ids
+                if template_preferences is not None
+                else None
+            ),
             activities=activity_history[:10],
             confirmed_planned_activity_ids=confirmed_planned_activity_ids,
             performance_profiles=derive_performance_profiles(activity_history, now),
@@ -364,6 +380,7 @@ def build_weekly_plan_input(
     dated_requests: Sequence[DatedWorkoutRequest],
     goals: Sequence[Goal],
     environments: Sequence[TrainingEnvironment],
+    enabled_workout_template_ids: list[str] | None,
     activities: Sequence[Activity],
     performance_profiles: Sequence[PerformanceProfile],
     conditions: Sequence[ConditionReport],
@@ -421,6 +438,16 @@ def build_weekly_plan_input(
             maximum_moderate_days,
             training_response.recommended_maximum_moderate_days,
         )
+    # Existing users have not chosen a candidate set yet; retain the previous
+    # catalog behavior until they save an explicit selection in Settings.
+    selected_catalog = (
+        CATALOG
+        if enabled_workout_template_ids is None
+        else compatible_templates(
+            [{"name": item.display_name} for item in environments],
+            enabled_workout_template_ids,
+        )
+    )
     return {
         "generation_key": generation_key,
         "generation_reason": generation_reason,
@@ -485,7 +512,7 @@ def build_weekly_plan_input(
             item.model_dump(mode="json") for item in performance_profiles
         ],
         "recent_training_response": training_response.model_dump(mode="json"),
-        "workout_catalog": catalog_payload(),
+        "workout_catalog": [item.model_dump(mode="json") for item in selected_catalog],
         "recent_conditions": [
             {
                 "activity_id": item.activity_id,
@@ -547,13 +574,15 @@ def validate_weekly_plan_output(
             ):
                 violations.append("invalid_rest_entry")
             continue
-        templates = {template.id: template for template in CATALOG}
+        templates = {
+            template["id"]: template for template in plan_input["workout_catalog"]
+        }
         template = templates.get(item.template_id or "")
         if template is None:
             violations.append("unknown_workout_template")
         elif (
-            template.title != item.workout_type
-            or template.intensity != item.target_intensity
+            template["title"] != item.workout_type
+            or template["intensity"] != item.target_intensity
         ):
             violations.append("template_output_mismatch")
         total_minutes += item.target_duration_minutes
@@ -637,6 +666,11 @@ def fallback_weekly_plan(plan_input: dict[str, Any], reason: str) -> WeeklyPlanO
     environment_names = {
         item["id"]: item["name"] for item in plan_input["environments"]
     }
+    templates = [
+        item
+        for item in CATALOG
+        if item.id in {template["id"] for template in plan_input["workout_catalog"]}
+    ]
     remaining_minutes = int(
         plan_input["hard_constraints"]["weekly_duration_limit_minutes"]
     )
@@ -657,7 +691,7 @@ def fallback_weekly_plan(plan_input: dict[str, Any], reason: str) -> WeeklyPlanO
         scheduled = False
         for slot in slots[:2]:
             prescribed = prescribe(
-                slot, environment_names, plan_input["performance_profiles"]
+                slot, environment_names, plan_input["performance_profiles"], templates
             )
             duration = min(
                 prescribed["duration"] if prescribed else 20,
