@@ -233,6 +233,7 @@ def build_weekly_plan_dto(
             "status": approval.status.value if approval is not None else "active",
             "rationale": plan.plan_rationale,
             "safety_constraints": list(plan.safety_flags),
+            "training_response": _training_response_dto(plan.input_snapshot),
             "previous_version": previous_plan.version if previous_plan else None,
             "version_changes": _version_changes(
                 plan, workouts, previous_plan, previous_workouts or []
@@ -244,6 +245,37 @@ def build_weekly_plan_dto(
             if approval is not None
             else None
         ),
+    }
+
+
+def _training_response_dto(input_snapshot: dict) -> dict[str, object] | None:
+    """Expose only display-safe, aggregate evidence for a plan adjustment."""
+    raw = input_snapshot.get("recent_training_response")
+    if not isinstance(raw, dict):
+        return None
+    source = raw.get("evidence_source")
+    completed = raw.get("completed_activity_count")
+    hard_rpe = raw.get("hard_rpe_activity_count")
+    maximum_moderate_days = raw.get("recommended_maximum_moderate_days")
+    reason_codes = raw.get("reason_codes")
+    if (
+        not isinstance(source, str)
+        or not isinstance(completed, int)
+        or not isinstance(hard_rpe, int)
+        or (
+            maximum_moderate_days is not None
+            and not isinstance(maximum_moderate_days, int)
+        )
+        or not isinstance(reason_codes, list)
+        or not all(isinstance(item, str) for item in reason_codes)
+    ):
+        return None
+    return {
+        "evidence_source": source,
+        "completed_activity_count": completed,
+        "hard_rpe_activity_count": hard_rpe,
+        "recommended_maximum_moderate_days": maximum_moderate_days,
+        "reason_codes": reason_codes,
     }
 
 
