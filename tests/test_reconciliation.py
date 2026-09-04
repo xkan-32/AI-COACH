@@ -144,7 +144,7 @@ async def test_manual_completion_status_is_kept_outside_planned_workout(
     assert workouts[0].status.value == "planned"
 
 
-async def test_high_confidence_match_uses_type_time_duration_and_distance() -> None:
+async def test_high_confidence_match_is_still_pending_user_selection() -> None:
     history, pointers, settings, workouts = await setup_plan(
         {
             "workout_type": "easy_run",
@@ -164,13 +164,14 @@ async def test_high_confidence_match_uses_type_time_duration_and_distance() -> N
 
     result = await service.reconcile(activity())
 
-    assert result.reconciliation.status == ReconciliationStatus.MATCHED
+    assert result.reconciliation.status == ReconciliationStatus.AMBIGUOUS
     assert result.reconciliation.planned_workout_id == workouts[0].id
     assert result.reconciliation.match_confidence == 1
-    assert result.reconciliation.confirmed is True
+    assert result.reconciliation.confirmed is False
     assert "activity_type_match" in result.reconciliation.matching_evidence
     assert result.reconciliation.duration_delta_minutes == 0
     assert result.reconciliation.distance_delta_meters == 0
+    assert "user_selection_required" in result.reconciliation.matching_evidence
 
 
 async def test_same_type_activity_outside_scheduled_time_requires_confirmation() -> (
@@ -293,7 +294,13 @@ async def test_second_activity_is_duplicate_candidate_unless_split_is_allowed() 
     service = WorkoutReconciliationService(
         history, pointers, settings, clock=lambda: NOW
     )
-    await service.reconcile(activity())
+    first = await service.reconcile(activity())
+    await service.correct(
+        user_id="line-1",
+        activity=activity(),
+        expected_reconciliation_id=first.reconciliation.id,
+        planned_workout_id=first.reconciliation.planned_workout_id,
+    )
     second = await service.reconcile(
         activity(
             id="activity-2",
@@ -301,7 +308,8 @@ async def test_second_activity_is_duplicate_candidate_unless_split_is_allowed() 
             source_type=ActivitySource.LINE_MANUAL,
         )
     )
-    assert second.reconciliation.status == ReconciliationStatus.DUPLICATE_CANDIDATE
+    assert second.reconciliation.status == ReconciliationStatus.AMBIGUOUS
+    assert "workout_already_has_activity" in second.reconciliation.matching_evidence
     assert second.reconciliation.confirmed is False
 
     split_history, split_pointers, split_settings, _ = await setup_plan(
@@ -318,8 +326,12 @@ async def test_second_activity_is_duplicate_candidate_unless_split_is_allowed() 
     split_second = await split_service.reconcile(
         activity(id="activity-2", source_activity_id="activity-2")
     )
-    assert split_second.reconciliation.status == ReconciliationStatus.MATCHED
-    assert split_second.reconciliation.confirmed is True
+    assert split_second.reconciliation.status == ReconciliationStatus.AMBIGUOUS
+    assert (
+        "workout_already_has_activity"
+        not in split_second.reconciliation.matching_evidence
+    )
+    assert split_second.reconciliation.confirmed is False
 
 
 async def test_no_active_plan_is_recorded_as_unplanned_without_sensitive_text() -> None:
@@ -333,7 +345,8 @@ async def test_no_active_plan_is_recorded_as_unplanned_without_sensitive_text() 
 
     result = await service.reconcile(actual)
 
-    assert result.reconciliation.status == ReconciliationStatus.UNPLANNED
+    assert result.reconciliation.status == ReconciliationStatus.UNMATCHED
+    assert result.reconciliation.confirmed is False
     assert result.reconciliation.planned_workout_id is None
     assert result.reconciliation.plan_version_id is None
     assert "private" not in str(result.reconciliation.model_dump())
@@ -473,32 +486,19 @@ async def test_missing_scan_does_not_conflict_with_ambiguous_activity_candidates
     assert missing == []
 
 
-async def test_retry_recovers_when_execution_save_failed_after_reconciliation() -> None:
-    class FlakyHistory(InMemoryPlanningHistoryStore):
-        def __init__(self) -> None:
-            super().__init__()
-            self.failed = False
-
-        async def save_execution_state(self, state) -> None:
-            if not self.failed:
-                self.failed = True
-                raise RuntimeError("temporary execution failure")
-            await super().save_execution_state(state)
-
+async def test_unselected_activity_does_not_create_execution_state() -> None:
     base_history, pointers, settings, workouts = await setup_plan(
         {"workout_type": "run", "target_duration_minutes": 30}
     )
-    history = FlakyHistory()
+    history = InMemoryPlanningHistoryStore()
     await history.save_plan(next(iter(base_history.plans.values())))
     await history.save_workouts(workouts)
     service = WorkoutReconciliationService(
         history, pointers, settings, clock=lambda: NOW
     )
 
-    with pytest.raises(RuntimeError, match="temporary execution"):
-        await service.reconcile(activity())
     result = await service.reconcile(activity())
 
-    assert result.reconciliation.confirmed is True
+    assert result.reconciliation.confirmed is False
     assert len(history.reconciliations) == 1
-    assert len(history.execution_states) == 1
+    assert history.execution_states == {}
