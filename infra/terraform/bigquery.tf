@@ -256,6 +256,34 @@ resource "google_bigquery_table" "workout_reviews" {
   ])
 }
 
+resource "google_bigquery_table" "activity_evaluations" {
+  dataset_id          = google_bigquery_dataset.coach.dataset_id
+  table_id            = "activity_evaluations"
+  deletion_protection = true
+  time_partitioning {
+    type  = "DAY"
+    field = "created_at"
+  }
+  clustering = ["athlete_id", "activity_id"]
+  schema = jsonencode([
+    { name = "id", type = "STRING", mode = "REQUIRED" },
+    { name = "activity_id", type = "STRING", mode = "REQUIRED" },
+    { name = "planned_workout_id", type = "STRING", mode = "REQUIRED" },
+    { name = "reconciliation_id", type = "STRING", mode = "REQUIRED" },
+    { name = "user_id", type = "STRING", mode = "REQUIRED" },
+    { name = "athlete_id", type = "STRING", mode = "REQUIRED" },
+    { name = "evaluation_version", type = "STRING", mode = "REQUIRED" },
+    { name = "combined_activity", type = "BOOLEAN", mode = "REQUIRED" },
+    { name = "plan_comparison", type = "STRING", mode = "REPEATED" },
+    { name = "actual_summary", type = "JSON", mode = "REQUIRED" },
+    { name = "load_summary", type = "JSON", mode = "REQUIRED" },
+    { name = "next_advice", type = "STRING", mode = "REQUIRED" },
+    { name = "safety_corrections", type = "STRING", mode = "REPEATED" },
+    { name = "publication_state", type = "STRING", mode = "REQUIRED" },
+    { name = "created_at", type = "TIMESTAMP", mode = "REQUIRED" },
+  ])
+}
+
 resource "google_bigquery_table" "user_training_profile_versions" {
   dataset_id          = google_bigquery_dataset.coach.dataset_id
   table_id            = "user_training_profile_versions"
@@ -273,6 +301,8 @@ resource "google_bigquery_table" "user_training_profile_versions" {
     { name = "provider_athlete_id", type = "STRING", mode = "NULLABLE" },
     { name = "experience_level", type = "STRING", mode = "NULLABLE" },
     { name = "notifications_enabled", type = "BOOLEAN", mode = "REQUIRED" },
+    # Nullable preserves existing profile-version rows during the additive rollout.
+    { name = "automatic_evaluation_publishing_enabled", type = "BOOLEAN", mode = "NULLABLE" },
     { name = "quiet_hours_start", type = "TIME", mode = "NULLABLE" },
     { name = "quiet_hours_end", type = "TIME", mode = "NULLABLE" },
     { name = "version", type = "INTEGER", mode = "REQUIRED" },

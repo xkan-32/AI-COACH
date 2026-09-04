@@ -53,6 +53,14 @@ from app.condition import (
     InMemoryConditionReportStore,
 )
 from app.config import Settings
+from app.evaluation import (
+    BigQueryEvaluationStore,
+    EvaluationPublicationStore,
+    EvaluationStore,
+    FirestoreEvaluationPublicationStore,
+    InMemoryEvaluationPublicationStore,
+    InMemoryEvaluationStore,
+)
 from app.ingestion import (
     ActivityStore,
     BigQueryActivityStore,
@@ -148,10 +156,13 @@ from app.state import (
     StravaTokenStore,
 )
 from app.tasks import (
+    ActivityEvaluationTaskPublisher,
     ActivityTaskPublisher,
+    CloudTasksActivityEvaluationPublisher,
     CloudTasksActivityPublisher,
     CloudTasksLineEventPublisher,
     CloudTasksProposalDecisionPublisher,
+    InMemoryActivityEvaluationTaskPublisher,
     InMemoryActivityTaskPublisher,
     InMemoryLineEventTaskPublisher,
     InMemoryProposalDecisionPublisher,
@@ -188,6 +199,7 @@ class Runtime:
     oauth_sessions: OAuthSessionStore
     tokens: StravaTokenStore
     tasks: ActivityTaskPublisher
+    evaluation_tasks: ActivityEvaluationTaskPublisher
     line_tasks: LineEventTaskPublisher
     activities: ActivityStore
     activity_laps: ActivityLapStore
@@ -220,6 +232,8 @@ class Runtime:
     profile_settings: ProfileSettingsStore
     settings_links: SettingsLinkStore
     planning_history: PlanningHistoryStore
+    evaluations: EvaluationStore
+    evaluation_publications: EvaluationPublicationStore
     active_plan_pointers: ActivePlanPointerStore
     active_readiness_pointers: ActiveReadinessPointerStore
     training_settings_state: TrainingSettingsStateStore
@@ -254,6 +268,7 @@ def build_runtime(settings: Settings) -> Runtime:
             oauth_sessions=InMemoryOAuthSessionStore(),
             tokens=InMemoryStravaTokenStore(),
             tasks=InMemoryActivityTaskPublisher(),
+            evaluation_tasks=InMemoryActivityEvaluationTaskPublisher(),
             line_tasks=InMemoryLineEventTaskPublisher(),
             activities=InMemoryActivityStore(),
             activity_laps=InMemoryActivityLapStore(),
@@ -288,6 +303,8 @@ def build_runtime(settings: Settings) -> Runtime:
             profile_settings=InMemoryProfileSettingsStore(goals, training_resources),
             settings_links=InMemorySettingsLinkStore(),
             planning_history=planning_history,
+            evaluations=InMemoryEvaluationStore(),
+            evaluation_publications=InMemoryEvaluationPublicationStore(),
             active_plan_pointers=active_plan_pointers,
             active_readiness_pointers=active_readiness_pointers,
             training_settings_state=training_settings,
@@ -356,6 +373,12 @@ def build_runtime(settings: Settings) -> Runtime:
             settings.worker_url,
             settings.task_service_account_email,
         ),
+        evaluation_tasks=CloudTasksActivityEvaluationPublisher(
+            tasks_v2.CloudTasksAsyncClient,
+            settings.cloud_tasks_queue_path,
+            settings.worker_url,
+            settings.task_service_account_email,
+        ),
         line_tasks=CloudTasksLineEventPublisher(
             tasks_v2.CloudTasksAsyncClient,
             settings.cloud_tasks_queue_path,
@@ -416,6 +439,10 @@ def build_runtime(settings: Settings) -> Runtime:
         profile_settings=FirestoreProfileSettingsStore(firestore_client),
         settings_links=FirestoreSettingsLinkStore(firestore_client),
         planning_history=planning_history,
+        evaluations=BigQueryEvaluationStore(
+            bigquery_client, f"{table_prefix}.activity_evaluations"
+        ),
+        evaluation_publications=FirestoreEvaluationPublicationStore(firestore_client),
         active_plan_pointers=active_plan_pointers,
         active_readiness_pointers=active_readiness_pointers,
         training_settings_state=FirestoreTrainingSettingsStateStore(firestore_client),

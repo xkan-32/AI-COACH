@@ -129,6 +129,7 @@ class UserTrainingProfile(ImmutableModel):
     provider_athlete_id: str | None = None
     experience_level: Literal["beginner", "intermediate", "advanced"] | None = None
     notifications_enabled: bool = False
+    automatic_evaluation_publishing_enabled: bool = False
     quiet_hours_start: time | None = None
     quiet_hours_end: time | None = None
     version: int = Field(default=1, ge=1)
