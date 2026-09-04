@@ -252,6 +252,59 @@ class WorkoutReconciliationService:
         )
         return ReconciliationResult(corrected, (workout,))
 
+    async def correct_multiple(
+        self,
+        *,
+        user_id: str,
+        activity: Activity,
+        expected_reconciliation_id: str,
+        planned_workout_ids: list[str],
+    ) -> ReconciliationResult:
+        selected = list(dict.fromkeys(planned_workout_ids))
+        if len(selected) == 1:
+            return await self.correct(
+                user_id=user_id,
+                activity=activity,
+                expected_reconciliation_id=expected_reconciliation_id,
+                planned_workout_id=selected[0],
+            )
+        first = await self.correct(
+            user_id=user_id,
+            activity=activity,
+            expected_reconciliation_id=expected_reconciliation_id,
+            planned_workout_id=selected[0],
+            reason="combined_activity",
+        )
+        expected = await self._history.get_reconciliation(expected_reconciliation_id)
+        workouts = {
+            item.id: item
+            for item in await self._history.list_workouts(expected.plan_version_id)
+        }
+        for index, workout_id in enumerate(selected[1:], start=1):
+            workout = workouts.get(workout_id)
+            if workout is None or workout.user_id != user_id:
+                raise ReconciliationError(
+                    "Planned workout does not belong to this user"
+                )
+            await self._create_for_workout(
+                activity,
+                workout,
+                status=_completion_status(activity, matched=True),
+                confidence=1.0,
+                evidence=["user_confirmed_planned_workout", "combined_activity"],
+                candidate_ids=expected.candidate_planned_workout_ids,
+                confirmed=True,
+                operation_id=f"manual:{expected.id}:combined:{workout_id}",
+                manual_correction=True,
+                correction_reason="combined_activity",
+                supersedes_reconciliation_id=first.reconciliation.id,
+                created_at=max(
+                    self._clock(),
+                    first.reconciliation.created_at + timedelta(microseconds=index),
+                ),
+            )
+        return first
+
     async def missing_candidates(
         self,
         user_id: str,
