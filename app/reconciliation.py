@@ -136,40 +136,23 @@ class WorkoutReconciliationService:
                 athlete_id=activity.athlete_id,
                 plan_version_id=plan_id,
                 operation_id=operation,
-                status=ReconciliationStatus.UNPLANNED,
+                status=ReconciliationStatus.UNMATCHED,
                 match_confidence=0.0,
                 matching_evidence=["no_planned_workout_on_local_date"],
-                confirmed=True,
+                confirmed=False,
                 created_at=self._clock(),
             )
             await self._history.save_reconciliation(result)
             return ReconciliationResult(result)
 
         top = candidates[0]
-        duplicate = await self._is_duplicate_candidate(top.workout, activity.id)
-        ambiguous = (
-            len(candidates) > 1
-            and candidates[1].confidence >= MINIMUM_CANDIDATE_THRESHOLD
-            and top.confidence - candidates[1].confidence <= AMBIGUITY_MARGIN
-        )
-        if duplicate:
-            status = ReconciliationStatus.DUPLICATE_CANDIDATE
-            is_confirmed = False
-            evidence = [*top.evidence, "workout_already_has_activity"]
-        elif ambiguous or (
-            MINIMUM_CANDIDATE_THRESHOLD <= top.confidence < HIGH_CONFIDENCE_THRESHOLD
-        ):
-            status = ReconciliationStatus.AMBIGUOUS
-            is_confirmed = False
-            evidence = list(top.evidence)
-        elif top.confidence < MINIMUM_CANDIDATE_THRESHOLD:
-            status = ReconciliationStatus.UNMATCHED
-            is_confirmed = False
-            evidence = list(top.evidence)
-        else:
-            status = _completion_status(activity, matched=True)
-            is_confirmed = True
-            evidence = list(top.evidence)
+        # Matching evidence only orders the displayed list. A user must always
+        # select the corresponding planned workout before it is confirmed.
+        status = ReconciliationStatus.AMBIGUOUS
+        is_confirmed = False
+        evidence = [*top.evidence, "user_selection_required"]
+        if await self._is_duplicate_candidate(top.workout, activity.id):
+            evidence.append("workout_already_has_activity")
         result = await self._create_for_workout(
             activity,
             top.workout,

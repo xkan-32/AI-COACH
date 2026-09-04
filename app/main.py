@@ -587,7 +587,7 @@ async def _reconcile_activity(activity, line_user_id: str) -> None:
                     f"&planned_workout_id={item.id}"
                 ),
             )
-            for item in result.candidates[:3]
+            for item in result.candidates[:11]
         ]
         choices.append(
             (
@@ -599,21 +599,22 @@ async def _reconcile_activity(activity, line_user_id: str) -> None:
                 ),
             )
         )
-        if reconciliation.status in {
-            ReconciliationStatus.AMBIGUOUS,
-            ReconciliationStatus.UNMATCHED,
-            ReconciliationStatus.DUPLICATE_CANDIDATE,
-        }:
-            message = "実施した運動に対応する予定を選んでください。"
-        else:
-            message = (
-                f"予定「{_workout_choice_label(result.candidates[0])}」に"
-                "照合しました。異なる場合は修正できます。"
-            )
+        message = "実施した運動に対応する今日の予定を選んでください。"
         await runtime.messenger.send_quick_reply(line_user_id, message, choices)
-    elif reconciliation.status == ReconciliationStatus.UNPLANNED:
-        await runtime.messenger.send_text(
-            line_user_id, "この運動は計画外Activityとして記録しました。"
+    elif reconciliation.status == ReconciliationStatus.UNMATCHED:
+        await runtime.messenger.send_quick_reply(
+            line_user_id,
+            "今日の予定に該当するメニューがありません。計画外として記録しますか？",
+            [
+                (
+                    "計画外",
+                    (
+                        f"action=reconciliation&activity_id={activity.id}"
+                        f"&reconciliation_id={reconciliation.id}"
+                        "&planned_workout_id=unplanned"
+                    ),
+                )
+            ],
         )
     await runtime.activity_ingestion_state.complete(activity.id, "reconciliation")
 
