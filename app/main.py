@@ -599,6 +599,18 @@ async def _reconcile_activity(activity, line_user_id: str) -> None:
                 ),
             )
         )
+        choices.extend(
+            [
+                (
+                    "別日の予定",
+                    f"action=reconciliation_other&activity_id={activity.id}&reconciliation_id={reconciliation.id}",
+                ),
+                (
+                    "あとで選ぶ",
+                    f"action=reconciliation_defer&activity_id={activity.id}&reconciliation_id={reconciliation.id}",
+                ),
+            ]
+        )
         message = "実施した運動に対応する今日の予定を選んでください。"
         await runtime.messenger.send_quick_reply(line_user_id, message, choices)
     elif reconciliation.status == ReconciliationStatus.UNMATCHED:
@@ -647,6 +659,50 @@ async def _handle_reconciliation_postback(line_user_id: str, data: str) -> bool:
         planned_workout_id=None if selected == "unplanned" else selected,
     )
     await runtime.messenger.send_text(line_user_id, "実績の対応を更新しました。")
+    return True
+
+
+async def _handle_reconciliation_other_postback(line_user_id: str, data: str) -> bool:
+    values = {key: items[0] for key, items in parse_qs(data).items() if items}
+    action = values.get("action")
+    if action not in {"reconciliation_other", "reconciliation_defer"}:
+        return False
+    activity_id, reconciliation_id = (
+        values.get("activity_id", ""),
+        values.get("reconciliation_id", ""),
+    )
+    context = await runtime.activity_contexts.get(activity_id)
+    reconciliation = await runtime.planning_history.get_reconciliation(
+        reconciliation_id
+    )
+    if (
+        context is None
+        or context.line_user_id != line_user_id
+        or reconciliation is None
+    ):
+        raise ReconciliationError("Activity does not belong to this LINE user")
+    if action == "reconciliation_defer":
+        await runtime.messenger.send_text(
+            line_user_id, "対応付けを保留しました。評価とStrava投稿は選択後に行います。"
+        )
+        return True
+    if reconciliation.plan_version_id is None:
+        await runtime.messenger.send_text(
+            line_user_id, "選択できる別日の予定はありません。"
+        )
+        return True
+    choices = [
+        (
+            _workout_choice_label(item),
+            f"action=reconciliation&activity_id={activity_id}&reconciliation_id={reconciliation_id}&planned_workout_id={item.id}",
+        )
+        for item in (
+            await runtime.planning_history.list_workouts(reconciliation.plan_version_id)
+        )[:12]
+    ]
+    await runtime.messenger.send_quick_reply(
+        line_user_id, "別日の予定を選んでください。", choices
+    )
     return True
 
 
@@ -1820,6 +1876,8 @@ async def process_line_event(event: dict) -> None:
             if await _handle_missing_reconciliation_postback(line_user_id, data):
                 return
             if await _handle_reconciliation_postback(line_user_id, data):
+                return
+            if await _handle_reconciliation_other_postback(line_user_id, data):
                 return
             if await manual_workflow.handle_postback(line_user_id, data):
                 return
