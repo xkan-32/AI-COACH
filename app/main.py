@@ -1621,6 +1621,22 @@ async def ingest_activity_task(
         )
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except StravaApiError as exc:
+        if exc.status_code == 404:
+            # A webhook can outlive an Activity that was deleted or is not
+            # visible to this authorization. Retrying cannot make a 404
+            # recover, so acknowledge it to Cloud Tasks and preserve only
+            # safe monitoring metadata.
+            await runtime.events.complete("strava", event.event_key)
+            logger.warning(
+                "strava_activity_ingestion_terminal event_key=%s activity_id=%s "
+                "athlete_id=%s error_kind=%s strava_status_code=404 "
+                "retry_suppressed=true",
+                event.event_key,
+                event.object_id,
+                event.owner_id,
+                exc.error_kind,
+            )
+            return {"status": "activity_not_found"}
         logger.warning(
             "strava_activity_ingestion_failed event_key=%s activity_id=%s "
             "athlete_id=%s error_kind=%s strava_status_code=%s",
