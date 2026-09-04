@@ -122,8 +122,10 @@ class CustomRunningCandidateInput(BaseModel):
     id: str | None = None
     title: str = Field(min_length=1, max_length=80)
     description: str = Field(min_length=1, max_length=300)
-    intensity: Literal["easy", "moderate"] = "easy"
     minimum_minutes: int = Field(default=30, ge=10, le=240)
+    maximum_distance_km: float | None = Field(default=None, gt=0, le=100)
+    fastest_pace_seconds_per_km: int | None = Field(default=None, ge=150, le=900)
+    example_structure: str = Field(default="", max_length=600)
 
 
 class ProfileSettingsInput(BaseModel):
@@ -701,7 +703,7 @@ async def profile_settings_page(request: Request) -> HTMLResponse:
     _settings_user(request)
     candidates_section = (
         "<section><h2>練習メニュー候補</h2>"
-        '<p class="hint">利用できる場所・器具に対応する候補です。使いたいものだけを選ぶと、AIは体調・目標・活動履歴・利用可能時間に合わせて週間計画を組み立てます。</p>'
+        '<p class="hint">利用できる場所・器具に対応する候補です。使いたいものだけを選ぶと、AIは体調・目標・活動履歴・利用可能時間に合わせて、例と上限の範囲内で週間計画を組み立てます。例はタップすると確認できます。</p>'
         '<div class="tiles workout-candidate-grid" id="workout-candidates"></div>'
         '<p class="hint" id="workout-candidates-empty">まず利用できる運動環境を保存してください。</p>'
         '<div id="custom-running-candidates"></div>'
@@ -716,10 +718,19 @@ async def profile_settings_page(request: Request) -> HTMLResponse:
     )
     mobile_styles = (
         "<style>.planning-link .add{display:block;text-align:center;text-decoration:none;"
-        "margin-top:12px}.workout-candidate-grid .tile span{align-items:flex-start;"
+        "margin-top:12px}.workout-candidate-grid{display:block}.candidate-group-title{font-size:16px;"
+        "margin:18px 0 8px}.candidate-group-title:first-child{margin-top:0}.workout-candidate-list{display:grid;"
+        "grid-template-columns:repeat(2,minmax(0,1fr));gap:9px}.workout-candidate{min-width:0;border:1px solid var(--line);"
+        "border-radius:12px;overflow:hidden}.workout-candidate .tile span{align-items:flex-start;"
         "justify-content:flex-start;text-align:left;padding:10px}.workout-candidate-grid small{"
         "display:block;color:var(--muted);font-size:12px;font-weight:400;margin-top:5px;"
-        "line-height:1.4}@media(max-width:420px){.workout-candidate-grid{grid-template-columns:1fr}}</style>"
+        "line-height:1.4}.candidate-example{border-top:1px solid var(--line);padding:8px 10px;color:var(--muted);"
+        "font-size:12px;line-height:1.45}.candidate-example summary{color:var(--green);font-weight:650;cursor:pointer}"
+        ".candidate-example ul{padding-left:18px;margin:8px 0 2px}.candidate-example li{margin:5px 0}"
+        "textarea{display:block;min-width:0;max-width:100%;width:100%;min-height:84px;font:inherit;font-size:16px;"
+        "line-height:1.35;color:var(--ink);background:#fff;border:1px solid #bac6be;border-radius:10px;padding:11px;"
+        "margin-top:5px;resize:vertical}.field-hint{display:block;margin-top:5px;color:var(--muted);font-size:12px;"
+        "line-height:1.4}@media(max-width:420px){.workout-candidate-list{grid-template-columns:1fr}}</style>"
     )
     page = SETTINGS_PAGE.read_text(encoding="utf-8")
     page = page.replace("</head>", f"{mobile_styles}</head>", 1)
@@ -838,8 +849,13 @@ async def update_profile_settings(
             ),
             "title": item.title.strip(),
             "description": item.description.strip(),
-            "intensity": item.intensity,
+            # The template remains safety-classified as easy; the AI chooses
+            # the actual intensity from readiness, goals, and performance data.
+            "intensity": "easy",
             "minimum_minutes": item.minimum_minutes,
+            "maximum_distance_km": item.maximum_distance_km,
+            "fastest_pace_seconds_per_km": item.fastest_pace_seconds_per_km,
+            "example_structure": item.example_structure.strip(),
         }
         for index, item in enumerate(payload.custom_running_candidates)
     ]

@@ -105,7 +105,10 @@ class VertexWeeklyPlanGenerator:
                     "constraint. Use only listed dates, availability slots, and "
                     "environment IDs. Performance profiles are advisory activity-based "
                     "ranges, not medical assessments or exact thresholds. Do not "
-                    "diagnose, invent sensor values, or promise outcomes."
+                    "diagnose, invent sensor values, or promise outcomes. Each workout "
+                    "catalog structure is an adjustable example: respect its maximum "
+                    "distance and duration, never exceed its fastest pace limit, and "
+                    "use only its allowed intensities."
                 ),
                 response_mime_type="application/json",
                 response_schema=WeeklyPlanOutput,
@@ -544,7 +547,10 @@ def build_weekly_plan_input(
         "task": (
             "Create at least one conservative workout or rest entry for each date. "
             "For every non-rest entry, select exactly one listed workout_catalog "
-            "template_id and preserve its title and intensity. "
+            "template_id, preserve its title, and choose target_intensity from its "
+            "allowed_intensities. Treat a template structure as an adjustable example, "
+            "not a fixed prescription; stay within its maximum distance, duration, "
+            "and fastest-pace limits. "
             "A date may have multiple workouts only when they use different slots, or "
             "a single slot explicitly allows splitting. Never combine rest with another "
             "workout on the same date. Explain the weekly balance and each daily choice "
@@ -587,11 +593,21 @@ def validate_weekly_plan_output(
         template = templates.get(item.template_id or "")
         if template is None:
             violations.append("unknown_workout_template")
-        elif (
-            template["title"] != item.workout_type
-            or template["intensity"] != item.target_intensity
+        elif template["title"] != item.workout_type or item.target_intensity not in (
+            template.get("allowed_intensities") or [template["intensity"]]
         ):
             violations.append("template_output_mismatch")
+        elif (
+            (
+                maximum_distance_km := (template.get("structure") or {}).get(
+                    "maximum_distance_km"
+                )
+            )
+            is not None
+            and item.target_distance_meters is not None
+            and item.target_distance_meters > float(maximum_distance_km) * 1000
+        ):
+            violations.append("template_distance_exceeded")
         total_minutes += item.target_duration_minutes
         if item.target_duration_minutes <= 0:
             violations.append("non_rest_requires_duration")
