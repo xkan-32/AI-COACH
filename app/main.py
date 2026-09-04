@@ -18,6 +18,12 @@ from app.approval import (
 from app.coaching import CoachingService
 from app.condition import ConditionWorkflow, InvalidConditionAction
 from app.config import get_settings
+from app.daily_workout_edit import (
+    DailyWorkoutEdit,
+    DailyWorkoutEditError,
+    DailyWorkoutEditKind,
+    DailyWorkoutEditService,
+)
 from app.domain.events import StravaWebhookEvent
 from app.domain.models import (
     ActivitySource,
@@ -291,6 +297,23 @@ class PlanRevisionDecisionInput(BaseModel):
     action_token: str = Field(min_length=1, max_length=2048)
 
 
+class DailyWorkoutEditInput(BaseModel):
+    base_plan_id: str = Field(min_length=1, max_length=128)
+    planned_workout_id: str = Field(min_length=1, max_length=128)
+    kind: DailyWorkoutEditKind
+    operation_id: str = Field(
+        min_length=1, max_length=128, pattern=r"^[A-Za-z0-9_.:-]+$"
+    )
+    scheduled_date: date | None = None
+    start_time: time | None = None
+    duration_minutes: int | None = Field(default=None, ge=0, le=240)
+    distance_meters: float | None = Field(default=None, ge=0, le=100_000)
+    intensity: Literal["rest", "easy", "moderate"] | None = None
+    outdoors: bool | None = None
+    environment_ids: list[str] | None = Field(default=None, max_length=10)
+    note: str = Field(default="", max_length=500)
+
+
 class MissingWorkoutScanTask(BaseModel):
     user_id: str = Field(min_length=1, max_length=128)
     line_user_id: str = Field(min_length=1, max_length=128)
@@ -352,6 +375,14 @@ def _plan_revision_service() -> PlanRevisionService:
         runtime.active_plan_pointers,
         runtime.training_settings_state,
         runtime.revision_action_signer,
+    )
+
+
+def _daily_workout_edit_service() -> DailyWorkoutEditService:
+    return DailyWorkoutEditService(
+        runtime.planning_history,
+        runtime.active_plan_pointers,
+        runtime.training_settings_state,
     )
 
 
@@ -1416,6 +1447,7 @@ async def get_weekly_plan(request: Request, response: Response) -> dict[str, obj
         ),
     )
     result["revision"] = {"enabled": is_active and approval is None}
+    result["daily_edit"] = {"enabled": is_active and approval is None}
     result["dashboard"] = build_training_dashboard_dto(
         workouts=workouts,
         local_today=await _local_today(plan.user_id),
@@ -1551,6 +1583,44 @@ async def decide_plan_revision(
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     response.headers["Cache-Control"] = "no-store"
     return result
+
+
+@app.post("/weekly-plan/api/daily-edits")
+async def apply_daily_workout_edit(
+    request: Request,
+    response: Response,
+    payload: DailyWorkoutEditInput,
+) -> dict[str, object]:
+    line_user_id, session_plan_id, session_version = _weekly_plan_session(request)
+    _check_weekly_plan_origin(request)
+    if payload.base_plan_id != session_plan_id:
+        raise HTTPException(
+            status_code=403, detail="週間計画の参照sessionが一致しません。"
+        )
+    plan = await runtime.planning_history.get_plan(session_plan_id)
+    if (
+        plan is None
+        or plan.line_user_id != line_user_id
+        or plan.version != session_version
+    ):
+        raise HTTPException(
+            status_code=403, detail="週間計画の所有者を確認できません。"
+        )
+    try:
+        replacement, duplicate = await _daily_workout_edit_service().apply(
+            user_id=plan.user_id,
+            line_user_id=line_user_id,
+            base_plan_id=plan.id,
+            edit=DailyWorkoutEdit.model_validate(payload.model_dump()),
+        )
+    except (DailyWorkoutEditError, PlanVersionConflict) as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    response.headers["Cache-Control"] = "no-store"
+    return {
+        "status": "duplicate" if duplicate else "active",
+        "plan_id": replacement.id,
+        "version": replacement.version,
+    }
 
 
 @app.get("/webhooks/strava")
