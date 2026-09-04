@@ -4,6 +4,7 @@ locals {
     "artifactregistry.googleapis.com",
     "bigquery.googleapis.com",
     "cloudtasks.googleapis.com",
+    "cloudscheduler.googleapis.com",
     "firestore.googleapis.com",
     "run.googleapis.com",
     "secretmanager.googleapis.com",
@@ -57,6 +58,27 @@ resource "google_cloud_tasks_queue" "events" {
     min_backoff        = "5s"
     max_backoff        = "300s"
   }
+}
+
+resource "google_cloud_scheduler_job" "weekly_plan_dispatch" {
+  name        = "ai-coach-weekly-plan-dispatch"
+  description = "Fans out timezone-aware weekly plan generation tasks."
+  schedule    = "*/5 * * * *"
+  time_zone   = "Etc/UTC"
+  region      = var.region
+
+  http_target {
+    http_method = "POST"
+    uri         = "${var.public_base_url}/tasks/plans/dispatch"
+    headers     = { "Content-Type" = "application/json" }
+    body        = base64encode("{}")
+    oidc_token {
+      service_account_email = google_service_account.api.email
+      audience              = var.public_base_url
+    }
+  }
+
+  depends_on = [google_project_service.required]
 }
 
 resource "google_service_account" "api" {

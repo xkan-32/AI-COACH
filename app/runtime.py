@@ -162,12 +162,15 @@ from app.tasks import (
     CloudTasksActivityPublisher,
     CloudTasksLineEventPublisher,
     CloudTasksProposalDecisionPublisher,
+    CloudTasksWeeklyPlanPublisher,
     InMemoryActivityEvaluationTaskPublisher,
     InMemoryActivityTaskPublisher,
     InMemoryLineEventTaskPublisher,
     InMemoryProposalDecisionPublisher,
+    InMemoryWeeklyPlanTaskPublisher,
     LineEventTaskPublisher,
     ProposalDecisionPublisher,
+    WeeklyPlanTaskPublisher,
 )
 from app.token_crypto import AesGcmTokenCipher
 from app.web_settings import (
@@ -200,6 +203,7 @@ class Runtime:
     tokens: StravaTokenStore
     tasks: ActivityTaskPublisher
     evaluation_tasks: ActivityEvaluationTaskPublisher
+    weekly_plan_tasks: WeeklyPlanTaskPublisher
     line_tasks: LineEventTaskPublisher
     activities: ActivityStore
     activity_laps: ActivityLapStore
@@ -269,6 +273,7 @@ def build_runtime(settings: Settings) -> Runtime:
             tokens=InMemoryStravaTokenStore(),
             tasks=InMemoryActivityTaskPublisher(),
             evaluation_tasks=InMemoryActivityEvaluationTaskPublisher(),
+            weekly_plan_tasks=InMemoryWeeklyPlanTaskPublisher(),
             line_tasks=InMemoryLineEventTaskPublisher(),
             activities=InMemoryActivityStore(),
             activity_laps=InMemoryActivityLapStore(),
@@ -374,6 +379,12 @@ def build_runtime(settings: Settings) -> Runtime:
             settings.task_service_account_email,
         ),
         evaluation_tasks=CloudTasksActivityEvaluationPublisher(
+            tasks_v2.CloudTasksAsyncClient,
+            settings.cloud_tasks_queue_path,
+            settings.worker_url,
+            settings.task_service_account_email,
+        ),
+        weekly_plan_tasks=CloudTasksWeeklyPlanPublisher(
             tasks_v2.CloudTasksAsyncClient,
             settings.cloud_tasks_queue_path,
             settings.worker_url,

@@ -125,7 +125,7 @@ class UserTrainingProfile(ImmutableModel):
     user_id: str = Field(min_length=1)
     timezone: str = "Asia/Tokyo"
     week_starts_on: Literal[0] = 0
-    weekly_generation_local_time: time = time(9, 0)
+    weekly_generation_local_time: time = time(21, 0)
     provider_athlete_id: str | None = None
     experience_level: Literal["beginner", "intermediate", "advanced"] | None = None
     notifications_enabled: bool = False
@@ -502,6 +502,7 @@ class TrainingPlanLifecycleEvent(ImmutableModel):
 
 class TrainingSettingsStateStore(Protocol):
     async def get_profile(self, user_id: str) -> UserTrainingProfile | None: ...
+    async def list_profiles(self) -> list[UserTrainingProfile]: ...
     async def save_profile(
         self, profile: UserTrainingProfile, expected_version: int | None
     ) -> None: ...
@@ -543,6 +544,9 @@ class InMemoryTrainingSettingsStore(
 
     async def get_profile(self, user_id: str) -> UserTrainingProfile | None:
         return self.profiles.get(user_id)
+
+    async def list_profiles(self) -> list[UserTrainingProfile]:
+        return sorted(self.profiles.values(), key=lambda item: item.user_id)
 
     async def save_profile(
         self, profile: UserTrainingProfile, expected_version: int | None = None
@@ -627,6 +631,13 @@ class FirestoreTrainingSettingsStateStore:
             UserTrainingProfile.model_validate(snapshot.to_dict())
             if snapshot.exists
             else None
+        )
+
+    async def list_profiles(self) -> list[UserTrainingProfile]:
+        snapshots = await self._client.collection("user_training_profiles").get()
+        return sorted(
+            [UserTrainingProfile.model_validate(item.to_dict()) for item in snapshots],
+            key=lambda item: item.user_id,
         )
 
     async def save_profile(

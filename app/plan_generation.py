@@ -171,6 +171,7 @@ class WeeklyPlanGenerationService:
         input_revision: str,
         operation_id: str,
         now: datetime,
+        auto_activate: bool = False,
     ) -> WeeklyPlanGenerationResult:
         if week_start.weekday() != 0:
             raise ValueError("week_start must be Monday")
@@ -277,7 +278,9 @@ class WeeklyPlanGenerationService:
             goals=goals,
             change_reason=generation_reason,
             athlete_id=profile.provider_athlete_id,
-            status=TrainingPlanStatus.DRAFT,
+            status=(
+                TrainingPlanStatus.ACTIVE if auto_activate else TrainingPlanStatus.DRAFT
+            ),
             plan_rationale=output.plan_rationale,
             safety_flags=[*display_safety_constraints, *safety_flags],
             ai_model=self._model_name,
@@ -326,8 +329,14 @@ class WeeklyPlanGenerationService:
         lifecycle = create_plan_lifecycle_event(
             plan,
             TrainingPlanStatus.GENERATING,
-            TrainingPlanStatus.DRAFT,
-            "fallback_created" if used_fallback else "shadow_plan_generated",
+            TrainingPlanStatus.ACTIVE if auto_activate else TrainingPlanStatus.DRAFT,
+            "scheduled_fallback_activated"
+            if auto_activate and used_fallback
+            else "scheduled_plan_activated"
+            if auto_activate
+            else "fallback_created"
+            if used_fallback
+            else "shadow_plan_generated",
             operation_id,
             occurred_at=now,
         )
@@ -335,7 +344,13 @@ class WeeklyPlanGenerationService:
         await self._history.save_workouts(workouts)
         await self._history.save_safety_gate(gate)
         await self._history.save_lifecycle_event(lifecycle)
-        if self._draft_registrar is not None:
+        if auto_activate:
+            from app.planning import PlanningService
+
+            await PlanningService(self._history, self._active_plans).activate_version(
+                plan, workouts
+            )
+        elif self._draft_registrar is not None:
             await self._draft_registrar.register_draft(plan)
         return WeeklyPlanGenerationResult(
             plan_id=plan.id,

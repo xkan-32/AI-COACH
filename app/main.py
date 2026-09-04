@@ -255,6 +255,7 @@ class WeeklyPlanGenerationTask(BaseModel):
         min_length=1, max_length=128, pattern=r"^[A-Za-z0-9_.:-]+$"
     )
     requested_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    auto_activate: bool = False
 
     @field_validator("requested_at")
     @classmethod
@@ -298,6 +299,17 @@ class MissingWorkoutScanTask(BaseModel):
     operation_id: str = Field(
         min_length=1, max_length=128, pattern=r"^[A-Za-z0-9_.:-]+$"
     )
+
+
+class WeeklyPlanDispatchTask(BaseModel):
+    requested_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+
+    @field_validator("requested_at")
+    @classmethod
+    def requested_at_must_be_timezone_aware(cls, value: datetime) -> datetime:
+        if value.tzinfo is None or value.utcoffset() is None:
+            raise ValueError("requested_at must be timezone-aware")
+        return value.astimezone(UTC)
 
 
 class ReadinessEvaluationTask(BaseModel):
@@ -1802,6 +1814,7 @@ async def generate_weekly_plan_task(
             input_revision=task.input_revision,
             operation_id=task.operation_id,
             now=task.requested_at,
+            auto_activate=task.auto_activate,
         )
     except Exception:
         await runtime.events.release("weekly_plan_generation", event_key)
@@ -1817,7 +1830,50 @@ async def generate_weekly_plan_task(
     )
     result_payload = result.model_dump(mode="json")
     result_payload["plan_status"] = result_payload.pop("status")
+    if task.auto_activate:
+        await send_weekly_plan_link(task.line_user_id)
     return {"status": "completed", **result_payload}
+
+
+@app.post("/tasks/plans/dispatch", status_code=202)
+async def dispatch_weekly_plan_tasks(
+    request: Request, task: WeeklyPlanDispatchTask
+) -> dict[str, int]:
+    await verify_cloud_task_request(request, get_settings())
+    dispatched = 0
+    for profile in await runtime.training_settings_state.list_profiles():
+        local_now = task.requested_at.astimezone(ZoneInfo(profile.timezone))
+        if (
+            local_now.weekday() != 6
+            or local_now.hour != profile.weekly_generation_local_time.hour
+            or local_now.minute != profile.weekly_generation_local_time.minute
+        ):
+            continue
+        week_start = local_now.date() + timedelta(days=1)
+        if await runtime.active_plan_pointers.get(profile.user_id, week_start):
+            continue
+        pending = await runtime.plan_approval_states.get_latest_for_line(
+            profile.user_id
+        )
+        if pending is not None and pending.week_start == week_start:
+            continue
+        operation_id = f"scheduled:{profile.user_id}:{week_start.isoformat()}:profile-{profile.version}"
+        await runtime.weekly_plan_tasks.publish(
+            WeeklyPlanGenerationTask(
+                user_id=profile.user_id,
+                line_user_id=profile.user_id,
+                week_start=week_start,
+                plan_version=1,
+                generation_reason="scheduled_weekly_generation",
+                input_revision=f"profile-{profile.version}",
+                operation_id=operation_id,
+                requested_at=task.requested_at,
+                auto_activate=True,
+            ).model_dump(mode="json")
+        )
+        dispatched += 1
+    logger.info("weekly_plan_dispatch_completed dispatched=%s", dispatched)
+    return {"status": "completed", "dispatched": dispatched}
 
 
 @app.post("/tasks/plans/reconcile-missing", status_code=202)
