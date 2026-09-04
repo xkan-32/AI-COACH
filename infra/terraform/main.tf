@@ -27,6 +27,14 @@ resource "google_project_service" "required" {
   disable_on_destroy = false
 }
 
+resource "google_project_service_identity" "scheduler" {
+  provider = google-beta
+  project  = var.project_id
+  service  = "cloudscheduler.googleapis.com"
+
+  depends_on = [google_project_service.required]
+}
+
 resource "google_bigquery_dataset" "coach" {
   dataset_id = "training_coach"
   location   = var.bigquery_location
@@ -78,7 +86,10 @@ resource "google_cloud_scheduler_job" "weekly_plan_dispatch" {
     }
   }
 
-  depends_on = [google_project_service.required]
+  depends_on = [
+    google_project_service_identity.scheduler,
+    google_service_account_iam_member.scheduler_token_creator,
+  ]
 }
 
 resource "google_service_account" "api" {
