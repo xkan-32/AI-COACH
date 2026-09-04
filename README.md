@@ -28,8 +28,7 @@ Strava、LINE、Vertex AI、Cloud Runを使い、利用可能時間・場所・�
 
 ### 未実装または未完成
 
-- ユーザーtimezoneの日曜21:00に翌週計画を自動生成・active化し、LINE通知するScheduler/Cloud Tasks導線
-- 週間画面からの日次・slot単位の直接編集、休養・取消・移動、AI代替案の保存UI
+- 直接編集: 将来・未開始の予定を、負荷を増やさない範囲で時間・距離・強度の変更、休養、取消、別slotへの移動として新しいactive versionへ保存する。AI代替案は既存の承認付き変更案を利用する
 - 複数予定へ対応付けたActivityの距離・時間・心拍を予定別に配分する評価。現状は`combined_activity`として同じ実績を参照する
 - 日次コンディションの同日訂正・履歴表示
 - quiet hours、通知設定、DLQ、監視・アラート、データ削除・export、総合E2E
@@ -69,7 +68,7 @@ pytest
 
 ## 次の実装
 
-最優先は、照合済みActivityの評価とStrava Description自動追記です。続いて日曜21:00の自動週間生成、日次・slot単位の編集、運用監視を実装します。引き継ぎ用の具体的な依頼文は [docs/next-session-prompt.md](docs/next-session-prompt.md) にあります。
+次は通知設定・quiet hours、DLQ、監視・アラートなどの運用機能を実装します。引き継ぎ用の具体的な依頼文は [docs/next-session-prompt.md](docs/next-session-prompt.md) にあります。
 
 ## LINEテキストコマンド
 

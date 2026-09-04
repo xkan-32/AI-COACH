@@ -13,6 +13,7 @@
     #approve{background:#247848;color:#fff}#reject{background:#f0e4e4;color:#7b2727}#repropose{grid-column:1/-1;background:#e7ebee;color:#24313a}
     button:disabled{opacity:.5}.error{color:#a02727}.notice{color:#195d39;font-weight:700}
     label{display:block;margin:10px 0 4px;font-weight:700}select,input,textarea{box-sizing:border-box;width:100%;padding:10px;border:1px solid #b9c5bd;border-radius:8px;background:#fff;font:inherit}
+    .workout-edit{margin-top:8px;padding:8px 12px;border:1px solid #247848;border-radius:8px;background:#fff;color:#195d39;font-weight:700}
   </style>
 </head>
 <body>
@@ -46,13 +47,24 @@
     <div class="actions"><button id="create-revision" type="button">変更案を作成</button></div>
     <div id="revision-proposal"></div><p id="revision-result" aria-live="polite"></p>
   </div>
+  <div id="daily-edit-card" class="card" hidden>
+    <h2>このメニューを変更</h2><p class="muted">直接編集では負荷を上げられません。保存すると新しい計画versionがすぐ有効になります。</p>
+    <label for="daily-edit-kind">操作</label><select id="daily-edit-kind"><option value="edit">時間・負荷を下げる</option><option value="move_slot">別の時間枠へ移動</option><option value="rest">休養へ変更</option><option value="cancel">取り消す</option></select>
+    <label for="daily-edit-date">日付（移動時）</label><input id="daily-edit-date" type="date">
+    <label for="daily-edit-time">開始時刻（移動時・編集時）</label><input id="daily-edit-time" type="time">
+    <label for="daily-edit-duration">所要時間（分）</label><input id="daily-edit-duration" type="number" min="0" max="240">
+    <label for="daily-edit-distance">距離（m、任意）</label><input id="daily-edit-distance" type="number" min="0" max="100000">
+    <label for="daily-edit-intensity">強度</label><select id="daily-edit-intensity"><option value="">変更しない</option><option value="rest">休養</option><option value="easy">軽め</option><option value="moderate">中程度</option></select>
+    <label for="daily-edit-note">理由・補足（任意）</label><textarea id="daily-edit-note" maxlength="500" rows="2"></textarea>
+    <div class="actions"><button id="daily-edit-save" type="button">変更を保存</button></div><p id="daily-edit-result" aria-live="polite"></p>
+  </div>
 </main>
 <script>
 let state=null;
 const text=(value,fallback="なし")=>value===null||value===undefined||value===""?fallback:String(value);
 const list=value=>(value&&value.length)?value.map(v=>`<span class="tag">${escapeHtml(v)}</span>`).join(""):'<span class="muted">なし</span>';
 const escapeHtml=value=>String(value).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
-const workoutHtml=workout=>`<div><strong>${escapeHtml(workout.type)}</strong><p>${text(workout.start_time,"時刻指定なし")} / ${text(workout.duration_minutes,0)}分 / ${text(workout.distance_meters)}m / ${escapeHtml(workout.intensity)}</p><div>${list(workout.environment_ids)}</div><p>${escapeHtml(workout.rationale||"日次理由はありません。")}</p><div><span class="muted">安全制約:</span> ${list(workout.safety_constraints)}</div></div>`;
+const workoutHtml=workout=>`<div><strong>${escapeHtml(workout.type)}</strong><p>${text(workout.start_time,"時刻指定なし")} / ${text(workout.duration_minutes,0)}分 / ${text(workout.distance_meters)}m / ${escapeHtml(workout.intensity)}</p><div>${list(workout.environment_ids)}</div><p>${escapeHtml(workout.rationale||"日次理由はありません。")}</p><div><span class="muted">安全制約:</span> ${list(workout.safety_constraints)}</div>${state&&state.daily_edit&&state.daily_edit.enabled?`<button class="workout-edit" type="button" data-workout-id="${escapeHtml(workout.id)}">このメニューを変更</button>`:""}</div>`;
 const activityHtml=activity=>`<article class="card"><strong>${escapeHtml(activity.type)}</strong><p>${escapeHtml(activity.started_at)} / ${text(activity.duration_minutes,0)}分 / ${text(activity.distance_meters,0)}m</p><p>${escapeHtml(activity.intensity||"強度未記録")} / ${escapeHtml(activity.completion_status||"記録済み")}</p></article>`;
 async function load(){
   const response=await fetch("/weekly-plan/api",{headers:{"Accept":"application/json"},cache:"no-store"});
@@ -65,6 +77,7 @@ async function load(){
   const reconciliationHtml=plan.reconciliation_summary.length?`<h2>計画と実績の照合</h2>${plan.reconciliation_summary.map(item=>`<p><strong>${escapeHtml(item.scheduled_date)} ${escapeHtml(item.workout_type)}</strong><br>${escapeHtml(statuses[item.status]||item.status)}${item.confirmed?"":"（確認が必要です）"}${item.match_confidence===null?"":` / 一致度 ${Math.round(item.match_confidence*100)}%`}</p>`).join("")}`:"";
   document.querySelector("#summary").innerHTML=`<div class="meta">version ${plan.version} / ${escapeHtml(plan.status)}</div><h2>週間の理由</h2><p>${escapeHtml(plan.rationale||"理由はありません。")}</p>${responseHtml}${reconciliationHtml}<h2>安全制約</h2><div>${list(plan.safety_constraints)}</div><h2>version差分</h2><div>${list(plan.version_changes)}</div>`;
   document.querySelector("#days").innerHTML=plan.days.map(day=>`<article class="card day"><h2>${escapeHtml(day.date)}</h2>${day.workouts.length?day.workouts.map(workoutHtml).join(""):'<p>休養またはメニューなし</p>'}<div><span class="muted">差分:</span> ${list(day.changes)}</div></article>`).join("");
+  document.querySelectorAll(".workout-edit").forEach(button=>button.addEventListener("click",()=>openDailyEdit(button.dataset.workoutId)));
   document.querySelector("#history").innerHTML=dashboard.history.activities.length?dashboard.history.activities.map(activityHtml).join(""):'<p class="card muted">最近の実績はまだありません。</p>';
   document.querySelector("#approval-card").hidden=!state.approval;
   document.querySelector("#revision-card").hidden=!(state.revision&&state.revision.enabled);
@@ -95,10 +108,30 @@ async function decideRevision(proposal,decision){
   if(body.proposal){renderProposal(body.proposal);document.querySelectorAll("button").forEach(button=>button.disabled=false)}
   const labels={active:"変更案を承認し、新しい計画を有効にしました。",rejected:"元の計画を維持します。",reproposal_requested:"別案を作成しました。",duplicate:"この回答は処理済みです。"};document.querySelector("#revision-result").className="notice";document.querySelector("#revision-result").textContent=labels[body.status]||"処理しました。";
 }
+function findWorkout(id){return state.plan.days.flatMap(day=>day.workouts).find(item=>item.id===id)}
+function openDailyEdit(id){
+  const workout=findWorkout(id);if(!workout)return;state.daily_edit_workout=workout;
+  document.querySelector("#daily-edit-card").hidden=false;
+  document.querySelector("#daily-edit-date").value="";document.querySelector("#daily-edit-time").value=workout.start_time||"";
+  document.querySelector("#daily-edit-duration").value=workout.duration_minutes??"";document.querySelector("#daily-edit-distance").value=workout.distance_meters??"";
+  document.querySelector("#daily-edit-intensity").value="";document.querySelector("#daily-edit-note").value="";
+  document.querySelector("#daily-edit-card").scrollIntoView({behavior:"smooth"});
+}
+async function saveDailyEdit(){
+  const workout=state&&state.daily_edit_workout;if(!workout)return;
+  const kind=document.querySelector("#daily-edit-kind").value;
+  const value=id=>document.querySelector(id).value;
+  const payload={base_plan_id:state.plan.id,planned_workout_id:workout.id,kind,operation_id:crypto.randomUUID(),scheduled_date:value("#daily-edit-date")||null,start_time:value("#daily-edit-time")||null,duration_minutes:value("#daily-edit-duration")===""?null:Number(value("#daily-edit-duration")),distance_meters:value("#daily-edit-distance")===""?null:Number(value("#daily-edit-distance")),intensity:value("#daily-edit-intensity")||null,note:value("#daily-edit-note")};
+  const response=await fetch("/weekly-plan/api/daily-edits",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)});const body=await response.json();
+  if(!response.ok)throw new Error(body.detail||"メニューを変更できませんでした。");
+  document.querySelector("#daily-edit-result").className="notice";document.querySelector("#daily-edit-result").textContent="保存しました。新しい計画をLINEから開き直してください。";
+  document.querySelector("#daily-edit-save").disabled=true;
+}
 document.querySelector("#approve").addEventListener("click",()=>decide("approve"));
 document.querySelector("#reject").addEventListener("click",()=>decide("reject"));
 document.querySelector("#repropose").addEventListener("click",()=>decide("repropose"));
 document.querySelector("#create-revision").addEventListener("click",()=>createRevision().catch(error=>{document.querySelector("#revision-result").className="error";document.querySelector("#revision-result").textContent=error.message}));
+document.querySelector("#daily-edit-save").addEventListener("click",()=>saveDailyEdit().catch(error=>{document.querySelector("#daily-edit-result").className="error";document.querySelector("#daily-edit-result").textContent=error.message}));
 load().catch(error=>{document.querySelector("#summary").className="card error";document.querySelector("#summary").textContent=error.message});
 </script>
 </body>

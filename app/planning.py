@@ -25,6 +25,7 @@ class WorkoutExecutionStatus(StrEnum):
     SKIPPED = "skipped"
     REPLACED = "replaced"
     NOT_PERFORMED = "not_performed"
+    CANCELLED = "cancelled"
 
 
 class ReconciliationStatus(StrEnum):
