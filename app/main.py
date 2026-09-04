@@ -733,6 +733,8 @@ async def profile_settings_page(request: Request) -> HTMLResponse:
         "line-height:1.4}.candidate-example{border-top:1px solid var(--line);padding:8px 10px;color:var(--muted);"
         "font-size:12px;line-height:1.45}.candidate-example summary{color:var(--green);font-weight:650;cursor:pointer}"
         ".candidate-example ul{padding-left:18px;margin:8px 0 2px}.candidate-example li{margin:5px 0}"
+        ".pace-picker{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px}.pace-picker .field{grid-column:1/-1;margin:0}"
+        ".pace-picker .field-hint{grid-column:1/-1}"
         "textarea{display:block;min-width:0;max-width:100%;width:100%;min-height:84px;font:inherit;font-size:16px;"
         "line-height:1.35;color:var(--ink);background:#fff;border:1px solid #bac6be;border-radius:10px;padding:11px;"
         "margin-top:5px;resize:vertical}.field-hint{display:block;margin-top:5px;color:var(--muted);font-size:12px;"
