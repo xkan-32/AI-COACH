@@ -9,6 +9,7 @@ from app.security import ApprovalActionSigner
 
 logger = logging.getLogger(__name__)
 _reply_token: ContextVar[str | None] = ContextVar("line_reply_token", default=None)
+_reply_only: ContextVar[bool] = ContextVar("line_reply_only", default=False)
 
 
 class LineApiError(RuntimeError):
@@ -17,8 +18,9 @@ class LineApiError(RuntimeError):
         self.status_code = status_code
 
 
-def set_line_reply_token(token: str | None) -> None:
+def set_line_reply_token(token: str | None, *, reply_only: bool | None = None) -> None:
     _reply_token.set(token)
+    _reply_only.set(token is not None if reply_only is None else reply_only)
 
 
 class LineConditionPromptSender:
@@ -193,7 +195,8 @@ class LineConditionPromptSender:
         messages: list[dict],
         retry_key: str | None = None,
     ) -> None:
-        if await self._try_reply(messages):
+        if _reply_only.get():
+            await self._reply(messages)
             return
         try:
             headers = {"Authorization": f"Bearer {self._token}"}
@@ -209,10 +212,10 @@ class LineConditionPromptSender:
         except httpx.HTTPError as exc:
             raise _line_api_error(exc) from exc
 
-    async def _try_reply(self, messages: list[dict]) -> bool:
+    async def _reply(self, messages: list[dict]) -> None:
         reply_token = _reply_token.get()
         if not reply_token:
-            return False
+            raise LineApiError("LINE reply token is unavailable")
         _reply_token.set(None)
         try:
             async with httpx.AsyncClient(timeout=self._timeout) as client:
@@ -222,11 +225,7 @@ class LineConditionPromptSender:
                     json={"replyToken": reply_token, "messages": messages},
                 )
                 response.raise_for_status()
-            return True
         except httpx.HTTPStatusError as exc:
-            if exc.response.status_code == 400:
-                logger.info("line_reply_rejected falling_back_to_push")
-                return False
             raise _line_api_error(exc) from exc
         except httpx.HTTPError as exc:
             raise _line_api_error(exc) from exc

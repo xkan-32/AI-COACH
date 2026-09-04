@@ -29,6 +29,7 @@ async def test_condition_prompt_uses_stable_line_retry_key(monkeypatch) -> None:
         retry_keys.append(request.headers["X-Line-Retry-Key"])
         return httpx.Response(200, json={}, request=request)
 
+    set_line_reply_token(None)
     _mock_client(monkeypatch, handler)
     sender = LineConditionPromptSender("secret")
     activity = Activity(
@@ -59,32 +60,42 @@ async def test_reply_token_uses_reply_api_once(monkeypatch) -> None:
     sender = LineConditionPromptSender("secret")
     set_line_reply_token("reply-1")
     await sender.send_text("line-user", "hello")
-    await sender.send_text("line-user", "again")
-    assert urls == [
-        "https://api.line.me/v2/bot/message/reply",
-        "https://api.line.me/v2/bot/message/push",
-    ]
+    with pytest.raises(LineApiError, match="reply token"):
+        await sender.send_text("line-user", "again")
+    assert urls == ["https://api.line.me/v2/bot/message/reply"]
 
 
-async def test_expired_reply_token_falls_back_to_push(monkeypatch) -> None:
+async def test_expired_reply_token_never_falls_back_to_push(monkeypatch) -> None:
     urls: list[str] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
         urls.append(str(request.url))
-        if request.url.path.endswith("/reply"):
-            return httpx.Response(
-                400, json={"message": "Invalid reply token"}, request=request
-            )
-        return httpx.Response(200, json={}, request=request)
+        return httpx.Response(
+            400, json={"message": "Invalid reply token"}, request=request
+        )
 
     _mock_client(monkeypatch, handler)
     sender = LineConditionPromptSender("secret")
     set_line_reply_token("stale")
+    with pytest.raises(LineApiError):
+        await sender.send_text("line-user", "hello")
+    assert urls == ["https://api.line.me/v2/bot/message/reply"]
+
+
+async def test_second_webhook_response_never_becomes_push(monkeypatch) -> None:
+    urls: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        urls.append(str(request.url))
+        return httpx.Response(200, json={}, request=request)
+
+    _mock_client(monkeypatch, handler)
+    sender = LineConditionPromptSender("secret")
+    set_line_reply_token("reply-1")
     await sender.send_text("line-user", "hello")
-    assert urls == [
-        "https://api.line.me/v2/bot/message/reply",
-        "https://api.line.me/v2/bot/message/push",
-    ]
+    with pytest.raises(LineApiError, match="reply token"):
+        await sender.send_text("line-user", "again")
+    assert urls == ["https://api.line.me/v2/bot/message/reply"]
 
 
 async def test_push_429_becomes_line_api_error(monkeypatch) -> None:
@@ -93,6 +104,7 @@ async def test_push_429_becomes_line_api_error(monkeypatch) -> None:
             429, json={"message": "Too Many Requests"}, request=request
         )
 
+    set_line_reply_token(None)
     _mock_client(monkeypatch, handler)
     sender = LineConditionPromptSender("secret")
     with pytest.raises(LineApiError) as caught:

@@ -1607,9 +1607,13 @@ async def receive_line_webhook(request: Request) -> Response:
         if not await runtime.events.reserve("line", event_key):
             continue
         try:
-            await runtime.line_tasks.publish(event_key, event)
+            # Reply tokens are short-lived and can only be used once.  Processing
+            # a user-originated event in Cloud Tasks turns its response into a
+            # paid Push message, so handle it in this webhook request instead.
+            await process_line_event(event)
+            await runtime.events.complete("line", event_key)
             logger.info(
-                "line_event_enqueued event_key=%s event_type=%s",
+                "line_event_completed event_key=%s event_type=%s delivery=reply",
                 event_key,
                 event.get("type", ""),
             )
@@ -1728,7 +1732,12 @@ async def process_line_event(event: dict) -> None:
     line_user_id = event.get("source", {}).get("userId", "")
     event_key = str(event.get("webhookEventId") or "")
     reply_token = event.get("replyToken")
-    set_line_reply_token(reply_token if isinstance(reply_token, str) else None)
+    # Every LINE webhook response is reply-only.  If LINE did not provide a
+    # reply token, suppress the response instead of converting it to Push.
+    set_line_reply_token(
+        reply_token if isinstance(reply_token, str) else None,
+        reply_only=True,
+    )
     try:
         if event_type == "postback":
             data = event.get("postback", {}).get("data", "")
@@ -1812,6 +1821,7 @@ async def process_line_event(event: dict) -> None:
         await _notify_line(line_user_id, str(exc))
     except LineApiError:
         logger.warning("line_message_failed event_type=%s", event_type)
+        raise
     finally:
         set_line_reply_token(None)
 
@@ -1822,7 +1832,13 @@ async def process_line_event_task(request: Request, payload: dict) -> dict[str, 
     event = payload.get("event")
     if not isinstance(event, dict):
         raise HTTPException(status_code=422, detail="Invalid LINE event task")
-    await process_line_event(event)
+    try:
+        await process_line_event(event)
+    except LineApiError:
+        # This endpoint is retained only to drain tasks created by older
+        # revisions.  Their reply tokens are no longer reliable; never retry
+        # them into a paid Push message.
+        logger.warning("line_event_task_reply_failed_without_push")
     event_key = str(payload.get("event_key", ""))
     if event_key:
         await runtime.events.complete("line", event_key)
