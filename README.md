@@ -21,6 +21,8 @@ Strava、LINE、Vertex AI、Cloud Runを使い、利用可能時間・場所・�
 - 計画基盤: 週間version、日次・slot単位の`PlannedWorkout`、可用時間、環境制約、嗜好、候補メニュー、AI週間生成、安全fallback、Readiness、再計画履歴
 - 練習候補: ランニング、インドアバイク、自重トレーニング等の標準候補、カスタム候補の追加・編集・削除・標準復元、ペースの分・秒入力
 - 実績照合: 自動確定を行わず、本人がLINEで予定を選択。計画外、別日の予定、保留、同一Activityへの複数予定の「まとめて実施」を扱う
+- Activity評価: 確定した予定対応ActivityだけをCloud Tasksで評価し、計画対比・実績・心拍等の負荷・次回助言を不変履歴へ保存する。複数予定は数値配分せず共通実績を参照する
+- Strava評価反映: 設定で有効な場合だけDescriptionのAI-COACH管理ブロックを冪等更新し、成功時だけLINE Push通知する。失敗状態はFirestoreに残す
 - 品質: pytest、ruff、Terraform validateをCIとデプロイ前に実行
 
 ### 未実装または未完成
@@ -28,7 +30,6 @@ Strava、LINE、Vertex AI、Cloud Runを使い、利用可能時間・場所・�
 - ユーザーtimezoneの日曜21:00に翌週計画を自動生成・active化し、LINE通知するScheduler/Cloud Tasks導線
 - 週間画面からの日次・slot単位の直接編集、休養・取消・移動、AI代替案の保存UI
 - 複数予定へ対応付けたActivityの距離・時間・心拍を予定別に配分する評価。現状は`combined_activity`として同じ実績を参照する
-- Activity照合後の評価生成・Strava Descriptionへの自動追記、設定でのon/off、失敗監視
 - 日次コンディションの同日訂正・履歴表示
 - quiet hours、通知設定、DLQ、監視・アラート、データ削除・export、総合E2E
 

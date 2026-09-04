@@ -165,3 +165,58 @@ class CloudTasksLineEventPublisher:
             await client.create_task(parent=self._queue_path, task=request)
         except AlreadyExists:
             return
+
+
+class ActivityEvaluationTaskPublisher(Protocol):
+    async def publish(self, activity_id: str, reconciliation_id: str) -> None: ...
+
+
+class InMemoryActivityEvaluationTaskPublisher:
+    def __init__(self) -> None:
+        self.items: list[tuple[str, str]] = []
+
+    async def publish(self, activity_id: str, reconciliation_id: str) -> None:
+        item = (activity_id, reconciliation_id)
+        if item not in self.items:
+            self.items.append(item)
+
+
+class CloudTasksActivityEvaluationPublisher:
+    def __init__(
+        self,
+        client_factory: object,
+        queue_path: str,
+        worker_url: str,
+        service_account_email: str,
+    ) -> None:
+        self._client_factory = client_factory
+        self._queue_path = queue_path
+        self._worker_url = worker_url
+        self._service_account_email = service_account_email
+
+    async def publish(self, activity_id: str, reconciliation_id: str) -> None:
+        from google.api_core.exceptions import AlreadyExists
+        from google.cloud import tasks_v2
+
+        key = f"activity-evaluation:{activity_id}:{reconciliation_id}"
+        request = tasks_v2.Task(
+            name=f"{self._queue_path}/tasks/{hashlib.sha256(key.encode()).hexdigest()}",
+            http_request=tasks_v2.HttpRequest(
+                http_method=tasks_v2.HttpMethod.POST,
+                url=f"{self._worker_url.rstrip('/')}/tasks/activities/evaluate",
+                headers={"Content-Type": "application/json"},
+                body=json.dumps(
+                    {"activity_id": activity_id, "reconciliation_id": reconciliation_id}
+                ).encode(),
+                oidc_token=tasks_v2.OidcToken(
+                    service_account_email=self._service_account_email,
+                    audience=self._worker_url,
+                ),
+            ),
+        )
+        try:
+            await self._client_factory().create_task(
+                parent=self._queue_path, task=request
+            )
+        except AlreadyExists:
+            return

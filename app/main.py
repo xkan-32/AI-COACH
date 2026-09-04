@@ -20,11 +20,17 @@ from app.condition import ConditionWorkflow, InvalidConditionAction
 from app.config import get_settings
 from app.domain.events import StravaWebhookEvent
 from app.domain.models import (
+    ActivitySource,
     CoachingContext,
     Goal,
     GoalPriority,
     TrainingEnvironment,
     TrainingEnvironmentCategory,
+)
+from app.evaluation import (
+    create_evaluation,
+    merge_managed_block,
+    render_managed_block,
 )
 from app.ingestion import ActivityIngestionService, UnknownAthleteToken
 from app.line import LineApiError, set_line_reply_token
@@ -219,6 +225,7 @@ class PlanningSettingsInput(BaseModel):
     preferences: list[WorkoutPreferenceInput] = Field(
         default_factory=list, max_length=20
     )
+    automatic_evaluation_publishing_enabled: bool | None = None
 
     @model_validator(mode="after")
     def unique_slots_and_preferences(self) -> "PlanningSettingsInput":
@@ -300,6 +307,11 @@ class ReadinessEvaluationTask(BaseModel):
     operation_id: str = Field(
         min_length=1, max_length=128, pattern=r"^[A-Za-z0-9_.:-]+$"
     )
+
+
+class ActivityEvaluationTask(BaseModel):
+    activity_id: str = Field(min_length=1, max_length=128)
+    reconciliation_id: str = Field(min_length=1, max_length=128)
 
 
 def _settings_signer() -> SettingsTokenSigner:
@@ -658,12 +670,14 @@ async def _handle_reconciliation_postback(line_user_id: str, data: str) -> bool:
         raise ReconciliationError("Activity does not belong to this LINE user")
     if activity.user_id is None:
         activity = activity.model_copy(update={"user_id": line_user_id})
-    await _reconciliation_service().correct(
+    result = await _reconciliation_service().correct(
         user_id=line_user_id,
         activity=activity,
         expected_reconciliation_id=reconciliation_id,
         planned_workout_id=None if selected == "unplanned" else selected,
     )
+    if result.reconciliation.confirmed and result.reconciliation.planned_workout_id:
+        await runtime.evaluation_tasks.publish(activity.id, result.reconciliation.id)
     await runtime.messenger.send_text(line_user_id, "実績の対応を更新しました。")
     return True
 
@@ -744,12 +758,21 @@ async def _handle_reconciliation_confirm_postback(line_user_id: str, data: str) 
         raise ReconciliationError("Invalid reconciliation selection")
     if activity.user_id is None:
         activity = activity.model_copy(update={"user_id": line_user_id})
-    await _reconciliation_service().correct_multiple(
+    result = await _reconciliation_service().correct_multiple(
         user_id=line_user_id,
         activity=activity,
         expected_reconciliation_id=reconciliation_id,
         planned_workout_ids=selected,
     )
+    for item in await runtime.planning_history.list_activity_reconciliations(
+        activity.id
+    ):
+        if (
+            item.confirmed
+            and item.planned_workout_id
+            and item.created_at >= result.reconciliation.created_at
+        ):
+            await runtime.evaluation_tasks.publish(activity.id, item.id)
     await runtime.messenger.send_text(
         line_user_id, "まとめて実施したメニューとして記録しました。"
     )
@@ -1140,12 +1163,16 @@ async def get_planning_settings(request: Request) -> dict[str, object]:
     line_user_id = _settings_user(request)
     service = _training_settings_service()
     availability = await service.get_availability(line_user_id)
+    profile = await service.get_profile(line_user_id)
     preferences = await service.effective_preferences(line_user_id, datetime.now(UTC))
     resources = await runtime.training_resources.list(line_user_id)
     return {
         "availability": availability.model_dump(mode="json") if availability else None,
         "preferences": [item.model_dump(mode="json") for item in preferences],
         "training_environments": [item.model_dump(mode="json") for item in resources],
+        "automatic_evaluation_publishing_enabled": (
+            profile.automatic_evaluation_publishing_enabled if profile else False
+        ),
     }
 
 
@@ -1157,8 +1184,8 @@ async def update_planning_settings(
     _check_settings_origin(request)
     service = _training_settings_service()
     now = datetime.now(UTC)
-    profile = await service.get_profile(line_user_id)
-    profile = profile or UserTrainingProfile(
+    stored_profile = await service.get_profile(line_user_id)
+    profile = stored_profile or UserTrainingProfile(
         user_id=line_user_id, operation_id="planning-settings-default", updated_at=now
     )
     current = await service.get_availability(line_user_id)
@@ -1250,6 +1277,24 @@ async def update_planning_settings(
             created_at=now,
         )
         await service.save_preference(preference)
+    if payload.automatic_evaluation_publishing_enabled is not None:
+        updated_profile = profile.model_copy(
+            update={
+                "automatic_evaluation_publishing_enabled": payload.automatic_evaluation_publishing_enabled,
+                "version": (stored_profile.version if stored_profile else 0) + 1,
+                "operation_id": f"{payload.operation_id}-evaluation-publishing",
+                "updated_at": now,
+            }
+        )
+        try:
+            await service.save_profile(
+                updated_profile, stored_profile.version if stored_profile else None
+            )
+        except PlanVersionConflict as exc:
+            raise HTTPException(
+                status_code=409,
+                detail="公開設定が更新されています。ページを開き直してください。",
+            ) from exc
     return {
         "status": "saved",
         "availability": availability.model_dump(mode="json"),
@@ -1527,7 +1572,7 @@ async def receive_strava_webhook(payload: dict) -> dict[str, str]:
         return {"status": "ignored"}
     try:
         await runtime.tasks.publish(event)
-    except Exception:
+    except LineApiError:
         await runtime.events.release("strava", event.event_key)
         raise
     logger.info(
@@ -1630,6 +1675,92 @@ async def decide_proposal_task(
         task.line_user_id, messages.get(result, "処理が完了しました。")
     )
     return {"status": result}
+
+
+@app.post("/tasks/activities/evaluate")
+async def evaluate_activity_task(
+    request: Request, task: ActivityEvaluationTask
+) -> dict[str, str]:
+    """Evaluate only an explicitly confirmed planned activity in a task worker."""
+    await verify_cloud_task_request(request, get_settings())
+    activity = await runtime.activities.get(task.activity_id)
+    reconciliation = await runtime.planning_history.get_reconciliation(
+        task.reconciliation_id
+    )
+    if (
+        activity is None
+        or reconciliation is None
+        or not reconciliation.confirmed
+        or reconciliation.activity_id != task.activity_id
+        or reconciliation.planned_workout_id is None
+        or reconciliation.plan_version_id is None
+    ):
+        return {"status": "not_evaluable"}
+    workout = next(
+        (
+            item
+            for item in await runtime.planning_history.list_workouts(
+                reconciliation.plan_version_id
+            )
+            if item.id == reconciliation.planned_workout_id
+        ),
+        None,
+    )
+    if workout is None:
+        return {"status": "not_evaluable"}
+    evaluation = create_evaluation(activity, workout, reconciliation)
+    await runtime.evaluations.save(evaluation)
+    profile = await runtime.training_settings_state.get_profile(workout.user_id)
+    if (
+        profile is None
+        or not profile.automatic_evaluation_publishing_enabled
+        or activity.source_type != ActivitySource.STRAVA
+    ):
+        return {"status": "evaluated"}
+    if not await runtime.evaluation_publications.claim(evaluation):
+        return {"status": "publication_duplicate"}
+    token = await runtime.tokens.get(activity.athlete_id)
+    if token is None or token.line_user_id != workout.user_id:
+        await runtime.evaluation_publications.fail(evaluation, "missing_strava_link")
+        logger.warning(
+            "activity_evaluation_publication_failed activity_id=%s evaluation_id=%s error=missing_strava_link",
+            activity.id,
+            evaluation.id,
+        )
+        return {"status": "publication_failed"}
+    try:
+        client = StravaOAuthClient(
+            get_settings().strava_client_id, get_settings().strava_client_secret
+        )
+        await client.update_description(
+            activity.id,
+            token.access_token,
+            merge_managed_block(activity.description, render_managed_block(evaluation)),
+        )
+    except StravaApiError as exc:
+        await runtime.evaluation_publications.fail(
+            evaluation, f"strava_{exc.error_kind}_{exc.status_code or 'unknown'}"
+        )
+        logger.warning(
+            "activity_evaluation_publication_failed activity_id=%s evaluation_id=%s error_kind=%s status_code=%s",
+            activity.id,
+            evaluation.id,
+            exc.error_kind,
+            exc.status_code,
+        )
+        return {"status": "publication_failed"}
+    await runtime.evaluation_publications.complete(evaluation)
+    try:
+        await runtime.messenger.send_text(
+            workout.user_id, "Stravaに評価を記載しました。"
+        )
+    except LineApiError:
+        logger.warning(
+            "activity_evaluation_push_failed activity_id=%s evaluation_id=%s",
+            activity.id,
+            evaluation.id,
+        )
+    return {"status": "published"}
 
 
 @app.post("/tasks/plans/generate", status_code=202)
