@@ -1,16 +1,38 @@
-# AI Training Coach MVP
+# AI Training Coach
 
-Stravaのアクティビティ取得を起点に、LINEで体調を確認し、Vertex AIで翌日のメニューを提案、ユーザー承認後にStrava Descriptionへ反映するMVPです。
+Strava、LINE、Vertex AI、Cloud Runを使い、利用可能時間・場所・器具・目標・実績に応じた週間トレーニング計画を扱うコーチアプリです。計画、実績、変更、評価は不変履歴として保存します。
 
-## MVPフロー
+## 現在の利用フロー
 
-1. Strava webhookがアクティビティ作成を通知する
-2. APIがStravaから詳細を取得し、BigQueryへ保存する
-3. LINEで体調確認を送る
-4. LINE回答を受け、対象Activity、体調、目標、運動環境と安全ルールをVertex AIへ渡す
-5. 翌日メニュー案をLINEへ送る
-6. ユーザーが承認または却下する
-7. 承認時のみ、提案要約を対象アクティビティのStrava Descriptionへ追記する
+1. LINEの設定画面で目標、環境・器具、運動可能時間、練習メニュー候補を設定する
+2. 「練習メニュー」から今日、今週の予定、最近の実績を確認する
+3. Strava ActivityまたはLINE手動Activityを記録する
+4. LINEで対応する予定を明示選択する（今日の予定、計画外、別日の予定、保留）
+5. 必要時は「まとめて実施」として複数予定を同じActivityへ対応付ける
+6. 体重・コンディションは必要な時にLINEから記録する。未入力は計画上「健康・影響なし」と扱う
+
+## 実装状況
+
+### 実装済み
+
+- GCP基盤: Cloud Run、Cloud Tasks、Firestore、BigQuery、Terraform、WIF、GitHub Actions、Secret Manager
+- Strava: OAuth、webhook、再送重複排除、token暗号化、Activity/Laps/非GPS Streams保存、区間負荷・同一ルート比較
+- LINE: rich menu、Reply API中心の応答、設定画面・練習メニューへの署名付きURL、手動Activity、体重、任意の日次コンディション
+- 計画基盤: 週間version、日次・slot単位の`PlannedWorkout`、可用時間、環境制約、嗜好、候補メニュー、AI週間生成、安全fallback、Readiness、再計画履歴
+- 練習候補: ランニング、インドアバイク、自重トレーニング等の標準候補、カスタム候補の追加・編集・削除・標準復元、ペースの分・秒入力
+- 実績照合: 自動確定を行わず、本人がLINEで予定を選択。計画外、別日の予定、保留、同一Activityへの複数予定の「まとめて実施」を扱う
+- 品質: pytest、ruff、Terraform validateをCIとデプロイ前に実行
+
+### 未実装または未完成
+
+- ユーザーtimezoneの日曜21:00に翌週計画を自動生成・active化し、LINE通知するScheduler/Cloud Tasks導線
+- 週間画面からの日次・slot単位の直接編集、休養・取消・移動、AI代替案の保存UI
+- 複数予定へ対応付けたActivityの距離・時間・心拍を予定別に配分する評価。現状は`combined_activity`として同じ実績を参照する
+- Activity照合後の評価生成・Strava Descriptionへの自動追記、設定でのon/off、失敗監視
+- 日次コンディションの同日訂正・履歴表示
+- quiet hours、通知設定、DLQ、監視・アラート、データ削除・export、総合E2E
+
+詳細な正本は [docs/line-app-activity-implementation-plan.md](docs/line-app-activity-implementation-plan.md)、機能別ロードマップは [docs/feature-session-roadmap.md](docs/feature-session-roadmap.md) を参照してください。
 
 詳細は [docs/implementation-plan.md](docs/implementation-plan.md) と [docs/architecture.md](docs/architecture.md) を参照してください。 初回GCP/WIF/GitHub Actions構築は [docs/bootstrap-and-cicd.md](docs/bootstrap-and-cicd.md) に手順があります。
 
@@ -43,9 +65,9 @@ pytest
 - `POST /webhooks/line` - 体調回答・承認操作
 - `POST /tasks/plans/reconcile-missing` - provider同期確認後の未実施候補scan（Cloud Tasks OIDC）
 
-## 実装順
+## 次の実装
 
-MVPのコアフロー、Cloud Tasks、Terraform/CI/CD、LINEリッチメニュー、PF-01、Strava token暗号化、OAuth session期限検証・TTL、Webhook再送の重複排除、GPS非保存の詳細Activity解析、versioned週間計画・実績評価・公開承認の基盤、手動shadow週間AI生成、署名付き週間画面と初回承認、練習メニューからの初回計画生成、LINE手動Activity、体重記録、計画と実績の共通matcher、Workout Review・次回Readiness・承認付き再計画はコード上実装済みです。次はNT-01（定期実行と運用）を進めます。週間計画・未実施確認の自動Scheduler、通知、note API連携はまだ有効化しません。
+最優先は、照合済みActivityの評価とStrava Description自動追記です。続いて日曜21:00の自動週間生成、日次・slot単位の編集、運用監視を実装します。引き継ぎ用の具体的な依頼文は [docs/next-session-prompt.md](docs/next-session-prompt.md) にあります。
 
 ## LINEテキストコマンド
 
