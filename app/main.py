@@ -582,9 +582,9 @@ async def _reconcile_activity(activity, line_user_id: str) -> None:
             (
                 _workout_choice_label(item),
                 (
-                    f"action=reconciliation&activity_id={activity.id}"
+                    f"action=reconciliation_multi&activity_id={activity.id}"
                     f"&reconciliation_id={reconciliation.id}"
-                    f"&planned_workout_id={item.id}"
+                    f"&planned_workout_ids={item.id}"
                 ),
             )
             for item in result.candidates[:11]
@@ -597,6 +597,12 @@ async def _reconcile_activity(activity, line_user_id: str) -> None:
                     f"&reconciliation_id={reconciliation.id}"
                     "&planned_workout_id=unplanned"
                 ),
+            )
+        )
+        choices.append(
+            (
+                "複数を選ぶ",
+                f"action=reconciliation_multi&activity_id={activity.id}&reconciliation_id={reconciliation.id}&planned_workout_ids=",
             )
         )
         choices.extend(
@@ -659,6 +665,94 @@ async def _handle_reconciliation_postback(line_user_id: str, data: str) -> bool:
         planned_workout_id=None if selected == "unplanned" else selected,
     )
     await runtime.messenger.send_text(line_user_id, "実績の対応を更新しました。")
+    return True
+
+
+async def _handle_reconciliation_multi_postback(line_user_id: str, data: str) -> bool:
+    values = {
+        key: items[0]
+        for key, items in parse_qs(data, keep_blank_values=True).items()
+        if items
+    }
+    if values.get("action") != "reconciliation_multi":
+        return False
+    activity_id, reconciliation_id = (
+        values.get("activity_id", ""),
+        values.get("reconciliation_id", ""),
+    )
+    selected = [
+        item for item in values.get("planned_workout_ids", "").split(",") if item
+    ]
+    context, activity = (
+        await runtime.activity_contexts.get(activity_id),
+        await runtime.activities.get(activity_id),
+    )
+    if context is None or context.line_user_id != line_user_id or activity is None:
+        raise ReconciliationError("Activity does not belong to this LINE user")
+    reconciliation = await runtime.planning_history.get_reconciliation(
+        reconciliation_id
+    )
+    if reconciliation is None or reconciliation.plan_version_id is None:
+        raise ReconciliationError("選択できる予定はありません")
+    workouts = await runtime.planning_history.list_workouts(
+        reconciliation.plan_version_id
+    )
+    choices = [
+        (
+            _workout_choice_label(item),
+            f"action=reconciliation_multi&activity_id={activity_id}&reconciliation_id={reconciliation_id}&planned_workout_ids={','.join([*selected, item.id])}",
+        )
+        for item in workouts
+        if item.id not in selected
+    ][:11]
+    if selected:
+        choices.append(
+            (
+                "この選択で確定",
+                f"action=reconciliation_confirm&activity_id={activity_id}&reconciliation_id={reconciliation_id}&planned_workout_ids={','.join(selected)}",
+            )
+        )
+    await runtime.messenger.send_quick_reply(
+        line_user_id,
+        "まとめて実施した予定を追加し、終わったら確定してください。",
+        choices,
+    )
+    return True
+
+
+async def _handle_reconciliation_confirm_postback(line_user_id: str, data: str) -> bool:
+    values = {key: items[0] for key, items in parse_qs(data).items() if items}
+    if values.get("action") != "reconciliation_confirm":
+        return False
+    activity_id, reconciliation_id = (
+        values.get("activity_id", ""),
+        values.get("reconciliation_id", ""),
+    )
+    selected = [
+        item for item in values.get("planned_workout_ids", "").split(",") if item
+    ]
+    context, activity = (
+        await runtime.activity_contexts.get(activity_id),
+        await runtime.activities.get(activity_id),
+    )
+    if (
+        context is None
+        or context.line_user_id != line_user_id
+        or activity is None
+        or not selected
+    ):
+        raise ReconciliationError("Invalid reconciliation selection")
+    if activity.user_id is None:
+        activity = activity.model_copy(update={"user_id": line_user_id})
+    await _reconciliation_service().correct_multiple(
+        user_id=line_user_id,
+        activity=activity,
+        expected_reconciliation_id=reconciliation_id,
+        planned_workout_ids=selected,
+    )
+    await runtime.messenger.send_text(
+        line_user_id, "まとめて実施したメニューとして記録しました。"
+    )
     return True
 
 
@@ -1876,6 +1970,10 @@ async def process_line_event(event: dict) -> None:
             if await _handle_missing_reconciliation_postback(line_user_id, data):
                 return
             if await _handle_reconciliation_postback(line_user_id, data):
+                return
+            if await _handle_reconciliation_multi_postback(line_user_id, data):
+                return
+            if await _handle_reconciliation_confirm_postback(line_user_id, data):
                 return
             if await _handle_reconciliation_other_postback(line_user_id, data):
                 return
