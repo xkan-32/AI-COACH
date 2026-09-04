@@ -13,6 +13,7 @@ class ActivityContext:
     activity_id: str
     athlete_id: str
     line_user_id: str
+    kind: str = "activity"
     expires_at: datetime = field(
         default_factory=lambda: datetime.now(UTC) + timedelta(days=7)
     )
@@ -79,6 +80,34 @@ class ConditionWorkflow:
         self._on_completed = on_completed
         self._clock = clock
 
+    async def start_daily(
+        self, line_user_id: str, athlete_id: str, local_date: str
+    ) -> None:
+        """Start an optional daily condition record without an Activity prompt."""
+        activity_id = f"daily:{line_user_id}:{local_date}"
+        await self._contexts.save(
+            ActivityContext(
+                activity_id=activity_id,
+                athlete_id=athlete_id,
+                line_user_id=line_user_id,
+                kind="daily",
+                expires_at=self._clock() + timedelta(hours=24),
+            )
+        )
+        await self._messenger.send_quick_reply(
+            line_user_id,
+            "今日のコンディションを選んでください。未入力の場合は、計画上は問題なしとして扱います。",
+            [
+                ("問題なし", f"action=condition&activity_id={activity_id}&level=good"),
+                ("疲労", f"action=condition&activity_id={activity_id}&level=fatigued"),
+                (
+                    "違和感",
+                    f"action=condition&activity_id={activity_id}&level=discomfort",
+                ),
+                ("痛み", f"action=condition&activity_id={activity_id}&level=pain"),
+            ],
+        )
+
     async def handle_postback(self, line_user_id: str, data: str) -> str:
         values = {key: items[0] for key, items in parse_qs(data).items() if items}
         if values.get("action") != "condition":
@@ -104,7 +133,7 @@ class ConditionWorkflow:
             await self._messenger.send_text(
                 line_user_id, "体調を記録しました。ありがとうございます。"
             )
-            if self._on_completed is not None:
+            if self._on_completed is not None and context.kind == "activity":
                 await self._on_completed(report)
             return "completed"
         await self._drafts.save(
@@ -185,7 +214,10 @@ class ConditionWorkflow:
         await self._messenger.send_text(
             line_user_id, "体調を記録しました。無理をせず休息を優先してください。"
         )
-        if self._on_completed is not None:
+        if (
+            self._on_completed is not None
+            and draft.activity_id.startswith("daily:") is False
+        ):
             await self._on_completed(report)
         return "completed"
 

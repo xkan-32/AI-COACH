@@ -469,7 +469,7 @@ def _next_workout(workouts, reconciliation, local_date) -> PlannedWorkout | None
 
 def _condition_factors(condition: ConditionReport | None) -> list[str]:
     if condition is None:
-        return ["condition:missing"]
+        return ["condition:healthy_default"]
     factors = [f"condition:{condition.level.value}"]
     if condition.severity is not None:
         factors.append(
@@ -488,7 +488,7 @@ def _safety_gate(condition, previous) -> tuple[SafetyGateStatus, list[str]]:
     if any(item.status == ReadinessStatus.BLOCKED for item in previous):
         return SafetyGateStatus.BLOCKED, ["previous_safety_block"]
     if condition is None:
-        return SafetyGateStatus.ALLOWED, ["condition_missing"]
+        return SafetyGateStatus.ALLOWED, ["condition_healthy_default"]
     if condition.level == ConditionLevel.PAIN:
         return SafetyGateStatus.BLOCKED, ["condition_pain"]
     if condition.worsened_during_activity is True:

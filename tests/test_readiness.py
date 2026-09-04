@@ -162,7 +162,7 @@ async def test_review_and_readiness_keep_separate_factors_and_safe_input() -> No
     assert "stream" not in serialized
 
 
-async def test_missing_condition_requires_information_without_calling_model() -> None:
+async def test_missing_condition_uses_healthy_default_and_calls_model() -> None:
     history, plans, settings, pointers, completed, _ = await setup_feedback()
     actual = activity()
     await reconcile(history, completed, actual)
@@ -173,9 +173,9 @@ async def test_missing_condition_requires_information_without_calling_model() ->
 
     result = await service.evaluate(actual, None)
 
-    assert result.assessment.status == ReadinessStatus.NEEDS_INFORMATION
-    assert "condition_missing" in result.assessment.reason_codes
-    assert generator.inputs == []
+    assert result.assessment.status == ReadinessStatus.AS_PLANNED
+    assert "condition_healthy_default" in result.assessment.reason_codes
+    assert len(generator.inputs) == 1
 
 
 async def test_pain_blocks_model_and_block_remains_sticky() -> None:
@@ -223,7 +223,7 @@ async def test_same_day_activities_append_revision_and_retry_is_idempotent() -> 
     assert len(history.readiness_assessments) == 2
 
 
-async def test_later_condition_answer_appends_review_without_mutating_missing_one() -> (
+async def test_later_condition_answer_appends_review_without_mutating_healthy_default() -> (
     None
 ):
     history, plans, settings, pointers, completed, _ = await setup_feedback()
@@ -236,10 +236,10 @@ async def test_later_condition_answer_appends_review_without_mutating_missing_on
     missing = await service.evaluate(actual, None, "grace-period")
     answered = await service.evaluate(actual, report(), "condition-answer")
 
-    assert missing.review.condition_factors == ["condition:missing"]
+    assert missing.review.condition_factors == ["condition:healthy_default"]
     assert answered.review.condition_factors == ["condition:good"]
     assert answered.review.supersedes_review_id == missing.review.id
-    assert missing.review.condition_factors == ["condition:missing"]
+    assert missing.review.condition_factors == ["condition:healthy_default"]
     assert answered.assessment.referenced_review_ids == [answered.review.id]
 
 

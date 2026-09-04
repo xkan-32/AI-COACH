@@ -30,7 +30,7 @@ note等への外部公開は当面の対象としない。週間計画はLINEリ
 - 計画の所有主体はStrava athleteではなくアプリユーザーとする。Strava未連携や手動Activityのみのユーザーも週間計画を利用でき、`athlete_id`はprovider linkとして任意に扱う。
 - 週はユーザーのIANA timezoneにおける月曜日00:00から日曜日23:59:59までとする。保存時刻はUTC、曜日・日付・通知判定はユーザーtimezoneで行う。
 - 「翌日」は原則として「次の未実施PlannedWorkout」を意味する。次の日が休養日なら、休養を上書きして運動を提案しない。
-- AIが作成した計画案をそのままactiveにしない。ユーザーが明示承認したversionだけをactive pointerへ設定する。
+- 定期生成した翌週計画は、AI出力の決定論的検証または安全fallbackを通過した時点でactive pointerへ設定する。ユーザーは必要な時だけ日次編集・AI変更を行う。手動変更案の適用は引き続き明示承認を必要とする。
 - 計画、実績、評価、変更案、承認は別recordとして保存し、過去recordを更新して意味を変えない。
 - AIの変更提案に対する承認と、安全上の実施可否を分離する。安全ゲートが`blocked`の場合、代替案を拒否しても元の高負荷メニューを実施可能へ戻さない。
 - 明示的に設定した好みと、実績から推定した好みを分離する。AI推定は根拠と信頼度を持ち、ユーザーが確認、修正、削除できるようにする。
@@ -55,14 +55,19 @@ note等への外部公開は当面の対象としない。週間計画はLINEリ
 ### 週間計画
 
 ```text
-generating -> draft -> pending_approval -> active -> superseded
-     |                         |
-     +-> generation_failed    +-> rejected / expired
+定期生成: generating -> draft -> active -> superseded
+                         |
+                         +-> generation_failed
+
+手動変更: PlanChangeRequest -> pending_approval -> active revision
+                                   |
+                                   +-> rejected / expired
 ```
 
 - `draft`はAI出力と決定論的検証が完了した未提示の案とする。
-- `pending_approval`はユーザーへ提示済みの案とする。
-- `active`は明示承認済みの計画だけに許可する。
+- 定期生成の`draft`は安全検証またはfallback後に自動で`active`へ遷移する。
+- `pending_approval`は日次編集やAI変更案をユーザーへ提示した状態とする。
+- `active`は定期生成では自動有効化、手動変更では明示承認済みのversionに許可する。
 - 同じユーザー・週にactiveなversionは1件だけとし、Firestore transactionでactive pointerを切り替える。
 - 却下、期限切れ、生成失敗時は既存の安全なactive planを維持する。初回計画が失敗した場合は、AIを使わない保守的fallback案を提示する。
 
@@ -315,22 +320,18 @@ Activityは少なくとも`source_type`、`source_activity_id`、`user_id`、任
 
 ### 計画と実績の照合規則
 
-照合の優先順位:
+Strava Activityと手動Activityのいずれも、保存後にLINEで対応する予定メニューをユーザーが必ず選択する。種目、予定時間帯、実施時刻、距離、時間によるmatcherは、候補の並べ替え・重複警告・説明に使用できるが、自動確定には使用しない。
 
-1. ユーザーが手動Activity登録時にPlannedWorkoutを指定した明示link
-2. 既に確認済みの照合
-3. 種目、予定時間帯、実施時刻、距離、時間から作る高信頼度の自動照合
-4. 複数候補や低信頼度の場合は未確定候補としてユーザーへ確認
+選択肢は、ユーザーtimezoneの「今日のメニュー」を予定時刻順で先頭に表示し、次に「メニュー外として記録」、最後に「別日のメニュー」を日付・予定時刻順で表示する。予定日の前倒し・後ろ倒し実施は、別日のメニューを明示選択して表現する。
 
 追加要件:
 
 - matcherの閾値と種目mappingにversionを付ける。
-- `matched/partial/unmatched`に加え、`ambiguous/unplanned/duplicate_candidate/not_performed`を表現できるようにする。
-- 1つのActivityを複数PlannedWorkoutへ自動確定しない。
-- splitを許可した計画だけ複数Activityとの対応を許可する。
-- Stravaと手動Activityが同じ実績を表す可能性がある場合は重複候補として確認する。
+- `matched/partial/unmatched`に加え、`selection_pending/unplanned/duplicate_candidate/not_performed`を表現できるようにする。
+- 1つのActivityは、ユーザーが明示選択した1件以上のPlannedWorkoutへ対応付けられる。複数予定を選択した場合、Activityの距離・時間・心拍等を各予定へ自動配分せず、各予定を`combined_activity`として扱う。
+- Stravaと手動Activityが同じ実績を表す可能性がある場合は重複警告を出し、ユーザーが選び直す。
 - 遅延同期のgrace period内は未実施を確定しない。
-- 自動照合結果はユーザーが修正でき、修正履歴を残す。
+- 未選択のActivityは評価・Strava自動投稿を行わず、選択保留として保存する。選択後の訂正履歴は残す。
 
 ## データ構造
 

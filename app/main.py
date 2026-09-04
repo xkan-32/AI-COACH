@@ -527,7 +527,6 @@ def _manual_activity_workflow() -> ManualActivityWorkflow:
         publications=runtime.manual_strava_publications,
         ingestion_state=runtime.activity_ingestion_state,
         on_saved=_reconcile_activity,
-        on_completed=_send_manual_activity_condition_prompt,
     )
 
 
@@ -545,8 +544,22 @@ def _weight_workflow() -> WeightWorkflow:
     )
 
 
-async def _send_manual_activity_condition_prompt(activity, line_user_id: str) -> None:
-    await runtime.condition_prompts.send(line_user_id, activity)
+async def start_daily_condition(line_user_id: str) -> None:
+    profile = await runtime.training_settings_state.get_profile(line_user_id)
+    timezone = profile.timezone if profile is not None else "Asia/Tokyo"
+    athlete_id = (
+        profile.provider_athlete_id
+        if profile is not None and profile.provider_athlete_id
+        else line_user_id
+    )
+    local_date = datetime.now(UTC).astimezone(ZoneInfo(timezone)).date().isoformat()
+    workflow = ConditionWorkflow(
+        runtime.activity_contexts,
+        runtime.condition_drafts,
+        runtime.condition_reports,
+        runtime.messenger,
+    )
+    await workflow.start_daily(line_user_id, athlete_id, local_date)
 
 
 def _reconciliation_service() -> WorkoutReconciliationService:
@@ -1389,7 +1402,7 @@ async def ingest_activity_task(
         StravaOAuthClient(settings.strava_client_id, settings.strava_client_secret),
         runtime.tokens,
         runtime.activities,
-        runtime.condition_prompts,
+        None,
         runtime.activity_contexts,
         runtime.activity_laps,
         runtime.activity_streams,
@@ -1585,9 +1598,20 @@ async def evaluate_readiness_task(
         reports = await runtime.condition_reports.list_recent(
             context.athlete_id, limit=20
         )
+        profile = await runtime.training_settings_state.get_profile(task.user_id)
+        timezone = profile.timezone if profile is not None else "Asia/Tokyo"
+        daily_activity_id = (
+            f"daily:{task.user_id}:"
+            f"{activity.started_at.astimezone(ZoneInfo(timezone)).date().isoformat()}"
+        )
         condition = next(
             (item for item in reports if item.activity_id == task.activity_id), None
         )
+        if condition is None:
+            condition = next(
+                (item for item in reports if item.activity_id == daily_activity_id),
+                None,
+            )
         result = await WorkoutFeedbackService(
             runtime.planning_history,
             runtime.active_plan_pointers,
@@ -1595,12 +1619,6 @@ async def evaluate_readiness_task(
             runtime.active_readiness_pointers,
             runtime.readiness_generator,
         ).evaluate(activity, condition, task.operation_id)
-        if (
-            condition is None
-            and result.assessment is not None
-            and result.assessment.status == ReadinessStatus.NEEDS_INFORMATION
-        ):
-            await runtime.condition_prompts.send(task.line_user_id, activity)
     except Exception:
         await runtime.events.release("readiness_evaluation", event_key)
         raise
@@ -1781,6 +1799,7 @@ async def process_line_event(event: dict) -> None:
         runtime.messenger,
         on_progress_requested=send_weekly_plan_link,
         on_manual_activity_requested=start_manual_activity,
+        on_condition_requested=start_daily_condition,
     )
     manual_workflow = _manual_activity_workflow()
     weight_workflow = _weight_workflow()

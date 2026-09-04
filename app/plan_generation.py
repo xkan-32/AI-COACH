@@ -217,13 +217,12 @@ class WeeklyPlanGenerationService:
         )
         activity_history: list[Activity] = []
         conditions: list[ConditionReport] = []
+        condition_owner_id = profile.provider_athlete_id or profile.user_id
         if profile.provider_athlete_id:
             activity_history = await self._activities.list_recent(
                 profile.provider_athlete_id, limit=60
             )
-            conditions = await self._conditions.list_recent(
-                profile.provider_athlete_id, limit=10
-            )
+        conditions = await self._conditions.list_recent(condition_owner_id, limit=10)
         confirmed_planned_activity_ids = await self._previous_plan_activity_ids(
             user_id, week_start
         )
@@ -424,7 +423,7 @@ def build_weekly_plan_input(
     latest_condition = (
         max(conditions, key=lambda item: item.reported_at).level.value
         if conditions
-        else None
+        else "good"
     )
     weekly_limit = min(
         MAX_WEEKLY_MINUTES,

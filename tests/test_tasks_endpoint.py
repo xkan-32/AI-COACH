@@ -361,6 +361,39 @@ def test_line_event_worker_starts_weight_from_condition_menu() -> None:
     assert "今日の体重をkgで送ってください" in runtime.messenger.quick_replies[-1][1]
 
 
+def test_line_event_worker_starts_daily_condition_from_condition_menu() -> None:
+    runtime.messenger.quick_replies.clear()
+    menu = client.post(
+        "/tasks/line/events",
+        json={
+            "event_key": "condition-hub-daily",
+            "event": {
+                "type": "postback",
+                "source": {"userId": "U-condition-daily"},
+                "postback": {"data": "action=menu&version=1&target=condition"},
+            },
+        },
+    )
+    assert menu.status_code == 200
+    choices = dict(runtime.messenger.quick_replies[-1][2])
+    response = client.post(
+        "/tasks/line/events",
+        json={
+            "event_key": "condition-hub-daily-start",
+            "event": {
+                "type": "postback",
+                "source": {"userId": "U-condition-daily"},
+                "postback": {"data": choices["コンディション"]},
+            },
+        },
+    )
+    assert response.status_code == 200
+    prompt = runtime.messenger.quick_replies[-1]
+    assert prompt[0] == "U-condition-daily"
+    assert "未入力の場合は、計画上は問題なし" in prompt[1]
+    assert set(dict(prompt[2])) == {"問題なし", "疲労", "違和感", "痛み"}
+
+
 def test_line_event_worker_completes_when_line_send_fails(monkeypatch) -> None:
     from app.line import LineApiError
     from app.main import runtime

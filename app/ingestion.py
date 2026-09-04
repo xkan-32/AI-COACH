@@ -46,7 +46,7 @@ class ActivityIngestionService:
         strava: StravaClient,
         tokens: StravaTokenStore,
         activities: ActivityStore,
-        prompts: ConditionPromptSender,
+        prompts: ConditionPromptSender | None,
         contexts: ActivityContextStore,
         laps: ActivityLapStore | None = None,
         streams: ActivityStreamStore | None = None,
@@ -151,7 +151,7 @@ class ActivityIngestionService:
         await self._contexts.save(
             ActivityContext(activity.id, activity.athlete_id, token.line_user_id)
         )
-        if (
+        if self._prompts is not None and (
             self._ingestion_state is None
             or not await self._ingestion_state.is_completed(activity_id, "prompt")
         ):

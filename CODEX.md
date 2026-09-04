@@ -17,7 +17,7 @@ terraform -chdir=infra/terraform validate
 2. Strava OAuth, webhook validation, ingestion, and idempotency.
 3. LINE linking, condition check, and follow-up state machine.
 4. Vertex AI structured proposal with deterministic safety validation.
-5. Signed approval and idempotent Strava Description append.
+5. Idempotent Strava Description append: activity evaluations may publish automatically when the user has enabled automatic evaluation publishing; other mutations require signed approval.
 6. End-to-end validation, monitoring, retention, and deletion flows.
 
 Do not deploy, create cloud resources, or insert secrets without explicit user authorization.
