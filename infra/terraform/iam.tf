@@ -32,6 +32,12 @@ resource "google_service_account_iam_member" "tasks_token_creator" {
   member             = "serviceAccount:service-${data.google_project.current.number}@gcp-sa-cloudtasks.iam.gserviceaccount.com"
 }
 
+resource "google_service_account_iam_member" "scheduler_token_creator" {
+  service_account_id = google_service_account.api.name
+  role               = "roles/iam.serviceAccountTokenCreator"
+  member             = "serviceAccount:service-${data.google_project.current.number}@gcp-sa-cloudscheduler.iam.gserviceaccount.com"
+}
+
 resource "google_cloud_run_v2_service_iam_member" "public" {
   count    = var.allow_public_invocation ? 1 : 0
   name     = google_cloud_run_v2_service.api.name
