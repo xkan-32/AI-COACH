@@ -41,6 +41,35 @@ async def test_good_condition_is_saved_immediately() -> None:
     assert messenger.texts[-1][0] == "line-1"
 
 
+async def test_daily_condition_is_saved_without_triggering_activity_follow_up() -> None:
+    contexts = InMemoryActivityContextStore()
+    drafts = InMemoryConditionDraftStore()
+    reports = InMemoryConditionReportStore()
+    messenger = InMemoryConditionPromptSender()
+    completed = []
+
+    async def on_completed(report) -> None:
+        completed.append(report)
+
+    workflow = ConditionWorkflow(
+        contexts,
+        drafts,
+        reports,
+        messenger,
+        on_completed=on_completed,
+        clock=lambda: datetime(2026, 9, 4, tzinfo=UTC),
+    )
+
+    await workflow.start_daily("line-1", "athlete-1", "2026-09-04")
+    choices = dict(messenger.quick_replies[-1][2])
+    result = await workflow.handle_postback("line-1", choices["疲労"])
+
+    assert result == "completed"
+    assert reports.items[0].activity_id == "daily:line-1:2026-09-04"
+    assert reports.items[0].level.value == "fatigued"
+    assert completed == []
+
+
 async def test_pain_follow_up_completes_report() -> None:
     workflow, drafts, reports, _ = await workflow_fixture()
     assert (

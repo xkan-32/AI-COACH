@@ -9,7 +9,7 @@ AIトレーニングコーチを1機能・1セッション・1PRで構築する�
 1. `main`から`feat/<session-id>-<topic>`ブランチを作る。
 2. Webhookは認証、正規化、enqueue、即時応答だけを行い、外部処理はCloud Tasks workerで行う。
 3. 分析履歴はBigQuery、会話状態・冪等性・OAuth・承認状態はFirestoreへ置く。
-4. 明示的で有効な本人承認なしにStravaを変更しない。
+4. Activity評価のStrava Description自動追記は、ユーザーが設定で有効化した場合に限り実行できる。更新はアプリ管理ブロックに限定し、冪等・監査可能・いつでも無効化可能にする。その他のStrava変更は明示的で有効な本人承認を必要とする。
 5. AIの前後に決定論的な安全ルールを適用する。
 6. GCP、IAM、API、設定はTerraformで管理する。
 7. Secret、token、`.env`、tfstate、実健康データをcommitしない。
@@ -20,8 +20,8 @@ AIトレーニングコーチを1機能・1セッション・1PRで構築する�
 
 ```text
 Strava Webhook -> Cloud Tasks -> Activity取得・保存
- -> LINE体調確認 -> LINE worker -> Vertex AI提案
- -> LINE明示承認 -> Cloud Tasks -> Strava Description追記
+ -> 任意の日次体調・計画との照合 -> Vertex AI評価
+ -> 自動投稿が有効なら Cloud Tasks -> Strava Description追記
 ```
 
 実装済み:
@@ -30,7 +30,7 @@ Strava Webhook -> Cloud Tasks -> Activity取得・保存
 - Strava OAuth、Webhook、Activity取得、Activity create再送の安定event keyによる重複排除
 - Strava tokenのAES-256-GCM暗号化、OAuth session期限検証、一時FirestoreデータのTTL
 - Strava Webhookの`200 OK`応答と、Activity取得失敗時の秘密情報を含まない安全ログ
-- LINE Webhook、体調4択、詳細入力、遅延返信用会話state
+- LINE Webhook、任意の日次体調4択・詳細入力、遅延返信用会話state
 - Vertex AI構造化提案と安全制約
 - 署名・期限付き承認、冪等なDescription更新
 - 目標・運動環境のテキストコマンド
@@ -227,7 +227,7 @@ docs/rich-menu-plan.md（LINE関連の場合）、関連コードとTerraformを
 要件:
 - Webhookは即時応答し、外部処理はCloud Tasksで行う
 - BigQuery/Firestoreの責務分離を守る
-- 明示承認なしにStravaを変更しない
+- Activity評価の自動投稿はユーザー設定で有効な場合のみ許可し、その他のStrava変更は明示承認を必要とする
 - AIの前後に決定論的安全ルールを適用する
 - GCP変更はTerraform管理する
 - testと日本語文書を更新する

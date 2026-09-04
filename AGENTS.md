@@ -19,7 +19,7 @@ Build a safe, auditable AI training coach integrating Strava, LINE Messaging API
 - Run external calls and retries in Cloud Tasks workers.
 - Use BigQuery for immutable analytical history.
 - Use Firestore for OAuth metadata, idempotency, conversation state, and approval transitions.
-- Only explicit, valid LINE approval may mutate Strava.
+- Strava may be updated automatically only for an activity evaluation when the user has enabled automatic evaluation publishing. Keep every update idempotent, limited to the app-managed Description block, auditable, and user-disableable. Other Strava mutations still require explicit, valid LINE approval.
 - Preserve existing Strava Description text and make updates idempotent.
 - Apply deterministic safety rules before and after AI generation.
 

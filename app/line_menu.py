@@ -31,8 +31,7 @@ MENU_MESSAGES = {
     "training_menu": "練習メニューを表示します。",
     "today_proposal": "練習メニューを表示します。",
     "condition": (
-        "アクティビティ後の体調は、運動後に届く確認メッセージから入力できます。"
-        "体重は上の「体重」から記録できます。"
+        "体調は必要な時に記録できます。未入力の場合は、計画上は問題なしとして扱います。"
     ),
     "manual_activity": (
         "運動の手動記録は準備中です。現時点ではStravaに記録された"
@@ -64,10 +63,12 @@ class MenuActionRouter:
         messenger: MenuMessenger,
         on_progress_requested: Callable[[str], Awaitable[None]] | None = None,
         on_manual_activity_requested: Callable[[str], Awaitable[None]] | None = None,
+        on_condition_requested: Callable[[str], Awaitable[None]] | None = None,
     ) -> None:
         self._messenger = messenger
         self._on_progress_requested = on_progress_requested
         self._on_manual_activity_requested = on_manual_activity_requested
+        self._on_condition_requested = on_condition_requested
 
     async def handle(self, line_user_id: str, data: str) -> bool:
         values = _single_value_query(data)
@@ -89,6 +90,9 @@ class MenuActionRouter:
             )
             return True
         if target == "condition_activity":
+            if self._on_condition_requested is not None:
+                await self._on_condition_requested(line_user_id)
+                return True
             await self._messenger.send_text(line_user_id, MENU_MESSAGES["condition"])
             return True
         if (
