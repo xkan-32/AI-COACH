@@ -84,7 +84,7 @@ from app.web_weekly_plan import (
 )
 from app.webhooks import verify_line_signature
 from app.weight import InvalidWeightAction, WeightWorkflow, parse_kilograms
-from app.workout_catalog import compatible_templates
+from app.workout_catalog import CATALOG, compatible_templates, normalize_template_id
 
 logger = logging.getLogger(__name__)
 
@@ -118,14 +118,19 @@ class EnvironmentInput(BaseModel):
     detail: str | None = Field(default=None, max_length=200)
 
 
-class CustomRunningCandidateInput(BaseModel):
+class WorkoutCandidateInput(BaseModel):
     id: str | None = None
+    sport: Literal["running", "cycling", "bodyweight"] = "running"
     title: str = Field(min_length=1, max_length=80)
     description: str = Field(min_length=1, max_length=300)
     minimum_minutes: int = Field(default=30, ge=10, le=240)
     maximum_distance_km: float | None = Field(default=None, gt=0, le=100)
     fastest_pace_seconds_per_km: int | None = Field(default=None, ge=150, le=900)
+    maximum_duration_minutes: int | None = Field(default=None, ge=10, le=240)
     example_structure: str = Field(default="", max_length=600)
+    required_environment_keywords: list[str] = Field(
+        default_factory=list, max_length=20
+    )
 
 
 class ProfileSettingsInput(BaseModel):
@@ -135,9 +140,10 @@ class ProfileSettingsInput(BaseModel):
     operation_id: str = Field(min_length=1, max_length=64, pattern=r"^[A-Za-z0-9_-]+$")
     target_weight_kg: float | None = None
     enabled_workout_template_ids: list[str] | None = Field(default=None, max_length=30)
-    custom_running_candidates: list[CustomRunningCandidateInput] = Field(
+    workout_candidates: list[WorkoutCandidateInput] = Field(
         default_factory=list, max_length=20
     )
+    reset_workout_candidates: bool = False
 
     @field_validator("target_weight_kg")
     @classmethod
@@ -707,7 +713,7 @@ async def profile_settings_page(request: Request) -> HTMLResponse:
         '<div class="tiles workout-candidate-grid" id="workout-candidates"></div>'
         '<p class="hint" id="workout-candidates-empty">まず利用できる運動環境を保存してください。</p>'
         '<div id="custom-running-candidates"></div>'
-        '<button class="add" id="add-running-candidate" type="button">＋ ランニング候補を追加</button>'
+        '<button class="add" id="add-workout-candidate" type="button">＋ 練習メニュー候補を追加</button>'
         '<button class="add" id="reset-workout-candidates" type="button">標準候補に戻す</button>'
         "</section>"
     )
@@ -794,7 +800,14 @@ async def get_profile_settings(request: Request) -> dict[str, object]:
         ],
         "revision": snapshot.revision,
         "target_weight_kg": await runtime.weight_targets.get(line_user_id),
-        "enabled_workout_template_ids": snapshot.enabled_workout_template_ids,
+        "enabled_workout_template_ids": (
+            [
+                normalize_template_id(item)
+                for item in snapshot.enabled_workout_template_ids
+            ]
+            if snapshot.enabled_workout_template_ids is not None
+            else None
+        ),
         "workout_candidates": [item.model_dump(mode="json") for item in candidates],
         "custom_running_candidates": snapshot.custom_running_candidates,
         "options": {
@@ -840,38 +853,67 @@ async def update_profile_settings(
     current_custom_ids = {
         str(item["id"]) for item in current_snapshot.custom_running_candidates
     }
-    custom_running_candidates = [
-        {
-            "id": item.id
-            if item.id in current_custom_ids
-            else profile_settings_item_id(
-                line_user_id, payload.operation_id, "custom-running-candidate", index
-            ),
-            "title": item.title.strip(),
-            "description": item.description.strip(),
-            # The template remains safety-classified as easy; the AI chooses
-            # the actual intensity from readiness, goals, and performance data.
-            "intensity": "easy",
-            "minimum_minutes": item.minimum_minutes,
-            "maximum_distance_km": item.maximum_distance_km,
-            "fastest_pace_seconds_per_km": item.fastest_pace_seconds_per_km,
-            "example_structure": item.example_structure.strip(),
-        }
-        for index, item in enumerate(payload.custom_running_candidates)
-    ]
+    catalog_by_id = {item.id: item for item in CATALOG}
+    allowed_candidate_ids = current_custom_ids | set(catalog_by_id)
     if any(
-        item.id is not None and item.id not in current_custom_ids
-        for item in payload.custom_running_candidates
+        item.id is not None and item.id not in allowed_candidate_ids
+        for item in payload.workout_candidates
     ):
         raise HTTPException(
             status_code=422,
             detail="練習候補が更新されています。ページを開き直してください。",
         )
-    if len({item["title"] for item in custom_running_candidates}) != len(
+
+    def candidate_values(item: WorkoutCandidateInput, index: int) -> dict[str, object]:
+        candidate_id = item.id or profile_settings_item_id(
+            line_user_id, payload.operation_id, "workout-candidate", index
+        )
+        base = catalog_by_id.get(candidate_id)
+        structure = (
+            dict(base.structure or {})
+            if base is not None
+            else {
+                "sport": item.sport,
+                "steps": [],
+                "adjustment_guidance": "AIは候補の上限と構成メモを守り、体調・利用時間・過去実績に合わせて調整します。",
+            }
+        )
+        if item.maximum_distance_km is not None or item.sport == "running":
+            structure["maximum_distance_km"] = item.maximum_distance_km
+        if item.fastest_pace_seconds_per_km is not None or item.sport == "running":
+            structure["fastest_pace_seconds_per_km"] = item.fastest_pace_seconds_per_km
+        if item.maximum_duration_minutes is not None:
+            structure["maximum_duration_minutes"] = item.maximum_duration_minutes
+        if item.example_structure.strip():
+            structure["freeform_example"] = item.example_structure.strip()
+        return {
+            "id": candidate_id,
+            "sport": item.sport,
+            "title": item.title.strip(),
+            "description": item.description.strip(),
+            "intensity": "easy",
+            "minimum_minutes": item.minimum_minutes,
+            "required_environment_keywords": [
+                value.strip()
+                for value in item.required_environment_keywords
+                if value.strip()
+            ],
+            "structure": structure,
+        }
+
+    custom_running_candidates = (
+        []
+        if payload.reset_workout_candidates
+        else [
+            candidate_values(item, index)
+            for index, item in enumerate(payload.workout_candidates)
+        ]
+    )
+    if len({item["id"] for item in custom_running_candidates}) != len(
         custom_running_candidates
     ):
         raise HTTPException(
-            status_code=422, detail="同じ名前のランニング候補は登録できません。"
+            status_code=422, detail="同じ練習候補を複数回保存できません。"
         )
     enabled_template_ids = payload.enabled_workout_template_ids
     if enabled_template_ids is not None:
@@ -879,12 +921,8 @@ async def update_profile_settings(
             *enabled_template_ids,
             *[
                 item["id"]
-                for item, supplied in zip(
-                    custom_running_candidates,
-                    payload.custom_running_candidates,
-                    strict=True,
-                )
-                if supplied.id is None
+                for item in custom_running_candidates
+                if item["id"] not in catalog_by_id
             ],
         ]
     compatible_ids = {

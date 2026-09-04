@@ -26,14 +26,14 @@ def test_catalog_exposes_structured_examples_and_ai_bounds() -> None:
     )
     by_id = {item.id: item for item in templates}
 
-    pace = by_id["run-pace-steady-v1"].structure
+    pace = by_id["run-pace-v1"].structure
     interval = by_id["run-interval-400-v1"].structure
     bike = by_id["bike-tempo-v1"].structure
 
     assert pace is not None
     assert pace["maximum_distance_km"] == 10
     assert pace["fastest_pace_seconds_per_km"] == 350
-    assert by_id["run-pace-steady-v1"].allowed_intensities == ["easy", "moderate"]
+    assert by_id["run-pace-v1"].allowed_intensities == ["easy", "moderate"]
     assert any(step["name"] == "ペース走" for step in pace["steps"])
     assert interval is not None
     assert any(step.get("duration_seconds") == 60 for step in interval["steps"])
@@ -63,6 +63,33 @@ def test_custom_running_candidate_keeps_structured_bounds() -> None:
     assert custom.structure["maximum_distance_km"] == 9
     assert custom.structure["fastest_pace_seconds_per_km"] == 340
     assert "1kmごと" in custom.structure["freeform_example"]
+
+
+def test_standard_candidate_can_be_overridden_with_specific_environment() -> None:
+    templates = compatible_templates(
+        [{"name": "河川敷"}],
+        custom_running_candidates=[
+            {
+                "id": "run-pace-v1",
+                "title": "ペース走",
+                "description": "河川敷で行うペース走",
+                "minimum_minutes": 35,
+                "required_environment_keywords": ["河川敷"],
+                "structure": {
+                    "sport": "running",
+                    "maximum_distance_km": 7,
+                    "fastest_pace_seconds_per_km": 365,
+                    "steps": [],
+                },
+            }
+        ],
+    )
+
+    pace = next(item for item in templates if item.id == "run-pace-v1")
+    assert pace.title == "ペース走"
+    assert pace.required_environment_keywords == ["河川敷"]
+    assert pace.structure is not None
+    assert pace.structure["maximum_distance_km"] == 7
 
 
 def test_prescribes_running_only_for_outdoor_running_environment() -> None:

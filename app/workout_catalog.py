@@ -6,6 +6,14 @@ from pydantic import BaseModel, Field
 
 CATALOG_VERSION = "workout-catalog-v2"
 RUNNING_ENVIRONMENT_KEYWORDS = ["ラン", "run", "公園", "屋外", "トレッドミル"]
+LEGACY_TEMPLATE_IDS = {
+    "run-pace-light-v1": "run-pace-v1",
+    "run-pace-steady-v1": "run-pace-v1",
+}
+
+
+def normalize_template_id(template_id: str) -> str:
+    return LEGACY_TEMPLATE_IDS.get(template_id, template_id)
 
 
 class WorkoutTemplate(BaseModel):
@@ -123,42 +131,9 @@ CATALOG = [
         ),
     ),
     WorkoutTemplate(
-        id="run-pace-light-v1",
+        id="run-pace-v1",
         sport="running",
-        title="ペース走（控えめ）",
-        intensity="moderate",
-        required_environment_keywords=["ラン", "run", "公園", "屋外", "トレッドミル"],
-        outdoors_allowed=None,
-        minimum_minutes=30,
-        description="ウォームアップとクールダウンを含め、持続可能なやや速いペースを短く保つ",
-        allowed_intensities=["easy", "moderate"],
-        structure=_running_structure(
-            maximum_distance_km=8,
-            fastest_pace_seconds_per_km=370,
-            steps=[
-                {
-                    "name": "ウォーミングアップ",
-                    "distance_km": "0〜2km",
-                    "pace": "7:00/km の例",
-                },
-                {
-                    "name": "ペース走",
-                    "distance_km": "2〜5km",
-                    "pace": "6:20〜6:40/km の例",
-                },
-                {
-                    "name": "クールダウン",
-                    "distance_km": "1〜2km",
-                    "pace": "7:00/km の例",
-                },
-            ],
-            adjustment_guidance="AIは距離を短縮し、過去の走行ペースを超えない範囲でペースを設定します。",
-        ),
-    ),
-    WorkoutTemplate(
-        id="run-pace-steady-v1",
-        sport="running",
-        title="ペース走（しっかり）",
+        title="ペース走",
         intensity="moderate",
         required_environment_keywords=["ラン", "run", "公園", "屋外", "トレッドミル"],
         outdoors_allowed=None,
@@ -181,7 +156,7 @@ CATALOG = [
                     "pace": "7:00/km の例",
                 },
             ],
-            adjustment_guidance="これは8kmの例です。AIは利用時間・体調・過去実績から距離とペースを範囲内で調整します。",
+            adjustment_guidance="これは8kmの例です。AIは利用時間・体調・過去実績から距離とペースを範囲内で調整します。控えめな日は距離を短くし、ペースも遅くします。",
         ),
     ),
     WorkoutTemplate(
@@ -465,19 +440,53 @@ def compatible_templates(
         if isinstance(environments, dict)
         else (item["name"] for item in environments)
     ).lower()
-    enabled = set(enabled_template_ids) if enabled_template_ids is not None else None
+    enabled = (
+        {normalize_template_id(item) for item in enabled_template_ids}
+        if enabled_template_ids is not None
+        else None
+    )
+    custom_by_id = {
+        normalize_template_id(str(item.get("id", ""))): item
+        for item in (custom_running_candidates or [])
+    }
+    catalog_ids = {item.id for item in CATALOG}
+    catalog = [
+        item.model_copy(
+            update={
+                key: value
+                for key, value in custom_by_id[item.id].items()
+                if key
+                in {
+                    "title",
+                    "description",
+                    "minimum_minutes",
+                    "required_environment_keywords",
+                    "outdoors_allowed",
+                    "allowed_intensities",
+                    "structure",
+                }
+            }
+        )
+        if item.id in custom_by_id
+        else item
+        for item in CATALOG
+    ]
     custom_templates = [
         WorkoutTemplate(
             id=item["id"],
-            sport="running",
+            sport=str(item.get("sport", "running")),
             title=item["title"],
-            intensity=item["intensity"],
-            required_environment_keywords=RUNNING_ENVIRONMENT_KEYWORDS,
-            outdoors_allowed=None,
+            intensity="easy",
+            required_environment_keywords=list(
+                item.get("required_environment_keywords")
+                or RUNNING_ENVIRONMENT_KEYWORDS
+            ),
+            outdoors_allowed=item.get("outdoors_allowed"),
             minimum_minutes=int(item["minimum_minutes"]),
             description=item["description"],
             allowed_intensities=["easy", "moderate"],
-            structure={
+            structure=item.get("structure")
+            or {
                 "sport": "running",
                 "maximum_distance_km": item.get("maximum_distance_km"),
                 "fastest_pace_seconds_per_km": item.get("fastest_pace_seconds_per_km"),
@@ -487,10 +496,11 @@ def compatible_templates(
             },
         )
         for item in (custom_running_candidates or [])
+        if normalize_template_id(str(item.get("id", ""))) not in catalog_ids
     ]
     return [
         item
-        for item in [*CATALOG, *custom_templates]
+        for item in [*catalog, *custom_templates]
         if (enabled is None or item.id in enabled)
         and any(keyword in names for keyword in item.required_environment_keywords)
     ]
