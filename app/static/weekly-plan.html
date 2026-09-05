@@ -8,7 +8,7 @@
     :root{color-scheme:light;font-family:system-ui,-apple-system,sans-serif;background:#f4f7f5;color:#17211b}
     body{margin:0}.wrap{max-width:760px;margin:auto;padding:18px}.card{background:#fff;border-radius:14px;padding:16px;margin:12px 0;box-shadow:0 2px 10px #16382012}
     h1{font-size:1.45rem;margin:8px 0}h2{font-size:1.05rem;margin:0 0 8px}.meta,.muted{color:#5c6b61;font-size:.9rem}
-    .day{border-left:5px solid #2e7d4f}.tag{display:inline-block;background:#e7f3eb;border-radius:99px;padding:3px 9px;margin:2px;font-size:.82rem}
+    .day{border-left:5px solid #2e7d4f}.workout{border-top:1px solid #e5ece7;padding:13px 0}.workout:first-child{border-top:0}.workout-title{font-size:1.05rem}.facts{display:flex;flex-wrap:wrap;gap:7px;margin:8px 0}.fact{background:#eef5f0;border-radius:8px;padding:5px 8px;font-size:.9rem}.tag{display:inline-block;background:#e7f3eb;border-radius:99px;padding:3px 9px;margin:2px;font-size:.82rem}
     ul{padding-left:20px}.actions{display:grid;gap:10px;grid-template-columns:1fr 1fr;margin-top:18px}.actions button{min-height:48px;border:0;border-radius:10px;font-size:1rem;font-weight:700}
     #approve{background:#247848;color:#fff}#reject{background:#f0e4e4;color:#7b2727}#repropose{grid-column:1/-1;background:#e7ebee;color:#24313a}
     button:disabled{opacity:.5}.error{color:#a02727}.notice{color:#195d39;font-weight:700}
@@ -64,7 +64,9 @@ let state=null;
 const text=(value,fallback="なし")=>value===null||value===undefined||value===""?fallback:String(value);
 const list=value=>(value&&value.length)?value.map(v=>`<span class="tag">${escapeHtml(v)}</span>`).join(""):'<span class="muted">なし</span>';
 const escapeHtml=value=>String(value).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
-const workoutHtml=workout=>`<div><strong>${escapeHtml(workout.type)}</strong><p>${text(workout.start_time,"時刻指定なし")} / ${text(workout.duration_minutes,0)}分 / ${text(workout.distance_meters)}m / ${escapeHtml(workout.intensity)}</p><div>${list(workout.environment_ids)}</div><p>${escapeHtml(workout.rationale||"日次理由はありません。")}</p><div><span class="muted">安全制約:</span> ${list(workout.safety_constraints)}</div>${state&&state.daily_edit&&state.daily_edit.enabled?`<button class="workout-edit" type="button" data-workout-id="${escapeHtml(workout.id)}">このメニューを変更</button>`:""}</div>`;
+const labels={easy_run:"イージーラン",run:"ランニング",ride:"サイクリング",strength:"筋力トレーニング",rest:"休養",easy:"軽め",moderate:"中程度",hard:"高強度"};
+const label=value=>labels[value]||text(value,"未設定");
+const workoutHtml=workout=>`<div class="workout"><strong class="workout-title">${escapeHtml(label(workout.type))}</strong><div class="facts"><span class="fact">開始 ${escapeHtml(text(workout.start_time,"指定なし"))}</span><span class="fact">${escapeHtml(text(workout.duration_minutes,0))}分</span>${workout.distance_meters!==null&&workout.distance_meters!==undefined?`<span class="fact">${escapeHtml(workout.distance_meters)}m</span>`:""}<span class="fact">強度: ${escapeHtml(label(workout.intensity))}</span></div>${workout.environment_ids?.length?`<div><span class="muted">環境:</span> ${list(workout.environment_ids)}</div>`:""}<p>${escapeHtml(workout.rationale||"この日の目的に合わせたメニューです。")}</p>${workout.safety_constraints?.length?`<div><span class="muted">安全:</span> ${list(workout.safety_constraints)}</div>`:""}${state?.daily_edit?.enabled?`<button class="workout-edit" type="button" data-workout-id="${escapeHtml(workout.id)}">このメニューを変更</button>`:""}</div>`;
 const activityHtml=activity=>`<article class="card"><strong>${escapeHtml(activity.type)}</strong><p>${escapeHtml(activity.started_at)} / ${text(activity.duration_minutes,0)}分 / ${text(activity.distance_meters,0)}m</p><p>${escapeHtml(activity.intensity||"強度未記録")} / ${escapeHtml(activity.completion_status||"記録済み")}</p></article>`;
 async function load(){
   const response=await fetch("/weekly-plan/api",{headers:{"Accept":"application/json"},cache:"no-store"});
@@ -124,8 +126,8 @@ async function saveDailyEdit(){
   const payload={base_plan_id:state.plan.id,planned_workout_id:workout.id,kind,operation_id:crypto.randomUUID(),scheduled_date:value("#daily-edit-date")||null,start_time:value("#daily-edit-time")||null,duration_minutes:value("#daily-edit-duration")===""?null:Number(value("#daily-edit-duration")),distance_meters:value("#daily-edit-distance")===""?null:Number(value("#daily-edit-distance")),intensity:value("#daily-edit-intensity")||null,note:value("#daily-edit-note")};
   const response=await fetch("/weekly-plan/api/daily-edits",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)});const body=await response.json();
   if(!response.ok)throw new Error(body.detail||"メニューを変更できませんでした。");
-  document.querySelector("#daily-edit-result").className="notice";document.querySelector("#daily-edit-result").textContent="保存しました。新しい計画をLINEから開き直してください。";
-  document.querySelector("#daily-edit-save").disabled=true;
+  document.querySelector("#daily-edit-result").className="notice";document.querySelector("#daily-edit-result").textContent="保存しました。表示を更新しています…";
+  await load(); document.querySelector("#daily-edit-card").hidden=true;
 }
 document.querySelector("#approve").addEventListener("click",()=>decide("approve"));
 document.querySelector("#reject").addEventListener("click",()=>decide("reject"));
