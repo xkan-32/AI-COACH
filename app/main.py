@@ -731,7 +731,52 @@ async def _handle_reconciliation_postback(line_user_id: str, data: str) -> bool:
     )
     if result.reconciliation.confirmed:
         await runtime.evaluation_tasks.publish(activity.id, result.reconciliation.id)
+    if selected == "unplanned":
+        await runtime.messenger.send_quick_reply(
+            line_user_id,
+            "予定との対応を選び直す場合はこちらを押してください。",
+            [
+                (
+                    "予定を選び直す",
+                    f"action=reconciliation_reopen&activity_id={activity.id}&reconciliation_id={result.reconciliation.id}",
+                )
+            ],
+        )
     await runtime.messenger.send_text(line_user_id, "実績の対応を更新しました。")
+    return True
+
+
+async def _handle_reconciliation_reopen_postback(line_user_id: str, data: str) -> bool:
+    values = {key: items[0] for key, items in parse_qs(data).items() if items}
+    if values.get("action") != "reconciliation_reopen":
+        return False
+    activity_id, reconciliation_id = (
+        values.get("activity_id", ""),
+        values.get("reconciliation_id", ""),
+    )
+    context, activity = (
+        await runtime.activity_contexts.get(activity_id),
+        await runtime.activities.get(activity_id),
+    )
+    if context is None or context.line_user_id != line_user_id or activity is None:
+        raise ReconciliationError("Activity does not belong to this LINE user")
+    if activity.user_id is None:
+        activity = activity.model_copy(update={"user_id": line_user_id})
+    result = await _reconciliation_service().reopen(
+        user_id=line_user_id,
+        activity=activity,
+        expected_reconciliation_id=reconciliation_id,
+    )
+    choices = [
+        (
+            _workout_choice_label(item),
+            f"action=reconciliation&activity_id={activity.id}&reconciliation_id={result.reconciliation.id}&planned_workout_id={item.id}",
+        )
+        for item in result.candidates[:11]
+    ]
+    await runtime.messenger.send_quick_reply(
+        line_user_id, "対応する予定を選び直してください。", choices
+    )
     return True
 
 
@@ -2254,6 +2299,8 @@ async def process_line_event(event: dict) -> None:
             if await _handle_missing_reconciliation_postback(line_user_id, data):
                 return
             if await _handle_reconciliation_postback(line_user_id, data):
+                return
+            if await _handle_reconciliation_reopen_postback(line_user_id, data):
                 return
             if await _handle_reconciliation_multi_postback(line_user_id, data):
                 return
