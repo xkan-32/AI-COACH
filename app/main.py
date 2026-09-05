@@ -493,12 +493,11 @@ async def _generate_initial_plan_for_line(line_user_id: str):
             updated_at=now,
         )
     week_start = profile.local_week_start(now)
-    latest = await _plan_approval_service().latest_state_for_line(line_user_id)
-    plan_version = (
-        latest.version + 1
-        if latest is not None and latest.week_start == week_start
-        else 1
+    active_id = await runtime.active_plan_pointers.get(line_user_id, week_start)
+    active_plan = (
+        await runtime.planning_history.get_plan(active_id) if active_id else None
     )
+    plan_version = active_plan.version + 1 if active_plan is not None else 1
     event_key = (
         f"initial_weekly_plan:{line_user_id}:{week_start.isoformat()}:"
         f"{profile.version}:v{plan_version}"
@@ -549,6 +548,12 @@ async def _active_plan_for_line(line_user_id: str):
         plan = await runtime.planning_history.get_plan(plan_id)
         if plan is not None and plan.line_user_id == line_user_id:
             return plan
+    recovered = await _plan_approval_service().recover_approved_orphan(line_user_id)
+    if recovered is not None and recovered.week_start in {
+        week_start,
+        week_start + timedelta(days=7),
+    }:
+        return recovered
     return None
 
 

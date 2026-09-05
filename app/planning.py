@@ -1479,8 +1479,10 @@ class PlanningService:
             raise PlanVersionConflict(
                 "supersedes_plan_version_id is not the active plan"
             )
-        if current_id is None and plan.version != 1:
-            raise PlanVersionConflict("First plan version must be 1")
+        if current_id is None and plan.supersedes_plan_version_id is not None:
+            raise PlanVersionConflict(
+                "A plan revision requires its predecessor to be active"
+            )
         if current_id is not None:
             current = await self._history.get_plan(current_id)
             if current is None or plan.version != current.version + 1:
@@ -1526,8 +1528,10 @@ class PlanningService:
             raise PlanVersionConflict(
                 "supersedes_plan_version_id is not the active plan"
             )
-        if current_id is None and plan.version != 1:
-            raise PlanVersionConflict("First plan version must be 1")
+        if current_id is None and plan.supersedes_plan_version_id is not None:
+            raise PlanVersionConflict(
+                "A plan revision requires its predecessor to be active"
+            )
         if current_id is not None:
             current = await self._history.get_plan(current_id)
             if current is None or plan.version != current.version + 1:
