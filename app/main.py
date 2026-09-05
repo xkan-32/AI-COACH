@@ -548,12 +548,12 @@ async def _active_plan_for_line(line_user_id: str):
         plan = await runtime.planning_history.get_plan(plan_id)
         if plan is not None and plan.line_user_id == line_user_id:
             return plan
-    recovered = await _plan_approval_service().recover_approved_orphan(line_user_id)
-    if recovered is not None and recovered.week_start in {
-        week_start,
-        week_start + timedelta(days=7),
-    }:
-        return recovered
+    for candidate_week in (week_start, week_start + timedelta(days=7)):
+        recovered = await _plan_approval_service().recover_approved_orphan(
+            line_user_id, candidate_week
+        )
+        if recovered is not None:
+            return recovered
     return None
 
 
@@ -635,6 +635,11 @@ async def _reconcile_activity(activity, line_user_id: str) -> None:
         activity.id, "reconciliation"
     ):
         return
+    profile = await runtime.training_settings_state.get_profile(line_user_id)
+    if profile is not None:
+        await _plan_approval_service().recover_approved_orphan(
+            line_user_id, profile.local_week_start(activity.started_at)
+        )
     result = await _reconciliation_service().reconcile(activity)
     reconciliation = result.reconciliation
     if result.candidates:
@@ -1913,7 +1918,7 @@ async def generate_weekly_plan_task(
 @app.post("/tasks/plans/dispatch", status_code=202)
 async def dispatch_weekly_plan_tasks(
     request: Request, task: WeeklyPlanDispatchTask
-) -> dict[str, int]:
+) -> dict[str, object]:
     await verify_cloud_task_request(request, get_settings())
     dispatched = 0
     for profile in await runtime.training_settings_state.list_profiles():

@@ -331,6 +331,27 @@ async def test_approved_orphan_is_recovered_without_rewriting_the_plan() -> None
     )
 
 
+async def test_approved_orphan_is_recovered_when_newer_revision_is_pending() -> None:
+    service, states, history, pointers, _, approved, _, _ = await setup_service()
+    await states.claim(
+        approved.id,
+        approved.version,
+        approved.user_id,
+        "line-1",
+        "approve",
+        NOW,
+    )
+    pending = make_plan(version=2, supersedes=approved.id)
+    await history.save_plan(pending)
+    await service.register_draft(pending)
+    await service.present(pending)
+
+    recovered = await service.recover_approved_orphan("line-1", WEEK)
+
+    assert recovered == approved
+    assert await pointers.get(approved.user_id, WEEK) == approved.id
+
+
 async def test_unactivatable_approval_does_not_claim_pending_state() -> None:
     service, states, history, _, signer, first, _, approval = await setup_service()
     second = make_plan(version=2, supersedes=first.id)

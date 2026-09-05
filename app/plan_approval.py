@@ -58,6 +58,7 @@ class PlanApprovalStateStore(Protocol):
     async def get_latest_for_line(
         self, line_user_id: str
     ) -> PlanApprovalState | None: ...
+    async def list_for_line(self, line_user_id: str) -> list[PlanApprovalState]: ...
     async def present(
         self, plan_id: str, version: int, line_user_id: str, now: datetime
     ) -> bool: ...
@@ -117,6 +118,16 @@ class InMemoryPlanApprovalStateStore:
     async def get_latest_for_line(self, line_user_id: str) -> PlanApprovalState | None:
         pointer = self.pending_by_line.get(line_user_id)
         return self.items.get(pointer[0]) if pointer is not None else None
+
+    async def list_for_line(self, line_user_id: str) -> list[PlanApprovalState]:
+        return sorted(
+            (item for item in self.items.values() if item.line_user_id == line_user_id),
+            key=lambda item: (
+                item.week_start,
+                item.version,
+                item.decided_at or item.expires_at,
+            ),
+        )
 
     async def present(
         self, plan_id: str, version: int, line_user_id: str, now: datetime
@@ -288,6 +299,23 @@ class FirestorePlanApprovalStateStore:
             return None
         state = PlanApprovalState.model_validate(snapshot.to_dict())
         return state if state.line_user_id == line_user_id else None
+
+    async def list_for_line(self, line_user_id: str) -> list[PlanApprovalState]:
+        from google.cloud.firestore_v1.base_query import FieldFilter
+
+        snapshots = await (
+            self._client.collection("plan_approval_states")
+            .where(filter=FieldFilter("line_user_id", "==", line_user_id))
+            .get()
+        )
+        return sorted(
+            [PlanApprovalState.model_validate(item.to_dict()) for item in snapshots],
+            key=lambda item: (
+                item.week_start,
+                item.version,
+                item.decided_at or item.expires_at,
+            ),
+        )
 
     async def present(
         self, plan_id: str, version: int, line_user_id: str, now: datetime
@@ -489,7 +517,7 @@ class PlanApprovalService:
         return await self._states.get_latest_for_line(line_user_id)
 
     async def recover_approved_orphan(
-        self, line_user_id: str
+        self, line_user_id: str, week_start: date | None = None
     ) -> TrainingPlanVersion | None:
         """Finish an approval whose active-pointer write was interrupted.
 
@@ -497,14 +525,17 @@ class PlanApprovalService:
         transient failure occurs after its Firestore transaction.  Recovering
         the same plan is safe only when no active plan exists for that week.
         """
-        state = await self._states.get_latest_for_line(line_user_id)
-        if (
-            state is None
-            or state.status != PlanApprovalStatus.APPROVED
-            or state.decision != "approve"
-            or state.decided_at is None
-        ):
+        approved = [
+            state
+            for state in await self._states.list_for_line(line_user_id)
+            if state.status == PlanApprovalStatus.APPROVED
+            and state.decision == "approve"
+            and state.decided_at is not None
+            and (week_start is None or state.week_start == week_start)
+        ]
+        if not approved:
             return None
+        state = approved[-1]
         plan = await self._history.get_plan(state.plan_id)
         if (
             plan is None
