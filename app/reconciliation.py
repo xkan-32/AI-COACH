@@ -252,6 +252,60 @@ class WorkoutReconciliationService:
         )
         return ReconciliationResult(corrected, (workout,))
 
+    async def reopen(
+        self, *, user_id: str, activity: Activity, expected_reconciliation_id: str
+    ) -> ReconciliationResult:
+        """Reopen a confirmed unplanned selection for an explicit new choice."""
+        expected = await self._history.get_reconciliation(expected_reconciliation_id)
+        history = await self._history.list_activity_reconciliations(activity.id)
+        if (
+            activity.user_id != user_id
+            or expected is None
+            or expected.user_id != user_id
+            or expected.activity_id != activity.id
+            or expected.status != ReconciliationStatus.UNPLANNED
+            or not history
+            or history[-1].id != expected.id
+        ):
+            raise ReconciliationError("Reconciliation selection is stale")
+        profile = await self._profile(user_id)
+        plan_id = await self._active_plans.get(
+            user_id, profile.local_week_start(activity.started_at)
+        )
+        workouts = await self._history.list_workouts(plan_id) if plan_id else []
+        local_started = activity.started_at.astimezone(ZoneInfo(profile.timezone))
+        candidates = sorted(
+            (
+                _score(activity, item, local_started)
+                for item in workouts
+                if item.scheduled_date == local_started.date()
+                and _workout_family(item.workout_type) != "rest"
+            ),
+            key=lambda item: (-item.confidence, item.workout.sequence),
+        )
+        if not candidates:
+            raise ReconciliationError("今日の予定に選び直せるメニューはありません")
+        top = candidates[0]
+        reopened = await self._create_for_workout(
+            activity,
+            top.workout,
+            status=ReconciliationStatus.AMBIGUOUS,
+            confidence=top.confidence,
+            evidence=[*top.evidence, "user_reopened_selection"],
+            candidate_ids=[item.workout.id for item in candidates],
+            confirmed=False,
+            operation_id=f"reopen:{expected.id}",
+            manual_correction=True,
+            correction_reason="user_reopened_selection",
+            supersedes_reconciliation_id=expected.id,
+            created_at=max(
+                self._clock(), expected.created_at + timedelta(microseconds=1)
+            ),
+        )
+        return ReconciliationResult(
+            reopened, tuple(item.workout for item in candidates)
+        )
+
     async def correct_multiple(
         self,
         *,
