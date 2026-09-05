@@ -6,6 +6,7 @@ from app.domain.models import Activity
 from app.evaluation import (
     MANAGED_BLOCK_END,
     MANAGED_BLOCK_START,
+    BigQueryEvaluationStore,
     InMemoryEvaluationPublicationStore,
     PublicationState,
     create_evaluation,
@@ -20,6 +21,17 @@ from app.planning import (
 )
 
 NOW = datetime(2026, 9, 8, 12, tzinfo=UTC)
+
+
+class FakeBigQueryClient:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, list[dict], list[str]]] = []
+
+    def insert_rows_json(
+        self, table: str, rows: list[dict], row_ids: list[str]
+    ) -> list:
+        self.calls.append((table, rows, row_ids))
+        return []
 
 
 def _activity(**changes) -> Activity:
@@ -147,6 +159,25 @@ async def test_publication_state_claim_is_idempotent_and_records_failure() -> No
     assert store.items[evaluation.id].state == PublicationState.FAILED
     assert store.items[evaluation.id].error_code == "strava_http_status_401"
     assert await store.claim(evaluation) is True
+
+
+async def test_bigquery_evaluation_store_serializes_json_columns() -> None:
+    workout = _workout()
+    evaluation = create_evaluation(_activity(), workout, _reconciliation(workout))
+    client = FakeBigQueryClient()
+
+    await BigQueryEvaluationStore(client, "project.dataset.activity_evaluations").save(
+        evaluation
+    )
+
+    _, rows, row_ids = client.calls[0]
+    assert rows[0]["actual_summary"] == (
+        '{"duration_minutes":30.0,"distance_meters":5000.0,'
+        '"average_heartrate_bpm":145.0,"max_heartrate_bpm":null,'
+        '"elevation_gain_meters":null}'
+    )
+    assert rows[0]["load_summary"].startswith('{"load_score":30.0')
+    assert row_ids == [evaluation.id]
 
 
 def test_unconfirmed_activity_is_rejected() -> None:

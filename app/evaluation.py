@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import json
 import uuid
 from datetime import UTC, datetime
 from enum import StrEnum
@@ -181,8 +182,13 @@ class BigQueryEvaluationStore:
 
     async def save(self, evaluation: ActivityEvaluation) -> None:
         row = evaluation.model_dump(mode="json")
-        for field in ("plan_comparison", "safety_corrections"):
-            row[field] = row[field]
+        # BigQuery's streaming insert API accepts JSON columns as serialized
+        # JSON strings. Sending Python mappings causes a row-level insert
+        # error and would otherwise retry the whole evaluation task.
+        for field in ("actual_summary", "load_summary"):
+            row[field] = json.dumps(
+                row[field], ensure_ascii=False, separators=(",", ":")
+            )
         errors = await asyncio.to_thread(
             self._client.insert_rows_json, self._table, [row], row_ids=[evaluation.id]
         )
