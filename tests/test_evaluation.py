@@ -92,6 +92,28 @@ def test_combined_activity_does_not_allocate_activity_numbers_to_each_workout() 
     assert "予定別の数値配分" in render_managed_block(evaluation)
 
 
+def test_confirmed_unplanned_activity_is_evaluated_without_plan_comparison() -> None:
+    reconciliation = create_reconciliation(
+        None,
+        "strava",
+        "workout-matcher-v2",
+        "activity-1",
+        user_id="line-1",
+        athlete_id="athlete-1",
+        status=ReconciliationStatus.UNPLANNED,
+        confirmed=True,
+        matching_evidence=["user_confirmed_unplanned"],
+        operation_id="selection-unplanned",
+        created_at=NOW,
+    )
+
+    evaluation = create_evaluation(_activity(), None, reconciliation)
+
+    assert evaluation.planned_workout_id is None
+    assert evaluation.plan_comparison == []
+    assert "計画外として記録" in render_managed_block(evaluation)
+
+
 def test_managed_description_block_replaces_only_its_own_content() -> None:
     workout = _workout()
     block = render_managed_block(
@@ -127,7 +149,7 @@ async def test_publication_state_claim_is_idempotent_and_records_failure() -> No
     assert await store.claim(evaluation) is True
 
 
-def test_unconfirmed_or_unplanned_activity_is_rejected() -> None:
+def test_unconfirmed_activity_is_rejected() -> None:
     workout = _workout()
     reconciliation = _reconciliation(workout).model_copy(update={"confirmed": False})
 

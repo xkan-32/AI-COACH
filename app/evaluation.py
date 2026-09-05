@@ -31,7 +31,7 @@ class ActivityEvaluation(BaseModel):
 
     id: str
     activity_id: str
-    planned_workout_id: str
+    planned_workout_id: str | None = None
     reconciliation_id: str
     user_id: str
     athlete_id: str
@@ -194,29 +194,41 @@ class BigQueryEvaluationStore:
 
 
 def create_evaluation(
-    activity: Activity, workout: PlannedWorkout, reconciliation: WorkoutReconciliation
+    activity: Activity,
+    workout: PlannedWorkout | None,
+    reconciliation: WorkoutReconciliation,
 ) -> ActivityEvaluation:
-    if not reconciliation.confirmed or reconciliation.planned_workout_id != workout.id:
+    if not reconciliation.confirmed:
+        raise ValueError("Only confirmed activities can be evaluated")
+    if workout is None:
+        if reconciliation.planned_workout_id is not None:
+            raise ValueError("A planned activity requires its planned workout")
+        if reconciliation.status.value != "unplanned":
+            raise ValueError("Only confirmed unplanned activities can omit a workout")
+    elif reconciliation.planned_workout_id != workout.id:
         raise ValueError("Only confirmed planned activities can be evaluated")
     combined = "combined_activity" in reconciliation.matching_evidence
-    comparison = [] if combined else _plan_comparison(activity, workout)
+    comparison = (
+        [] if combined or workout is None else _plan_comparison(activity, workout)
+    )
     load = _load_summary(activity)
     advice, corrections = _safe_next_advice(activity, load)
     identifier = str(
         uuid.uuid5(
             uuid.NAMESPACE_URL,
-            f"ai-coach:evaluation:{activity.id}:{workout.id}:{EVALUATION_VERSION}",
+            "ai-coach:evaluation:"
+            f"{activity.id}:{workout.id if workout else 'unplanned'}:{EVALUATION_VERSION}",
         )
     )
     return ActivityEvaluation(
         id=identifier,
         activity_id=activity.id,
-        planned_workout_id=workout.id,
+        planned_workout_id=workout.id if workout else None,
         reconciliation_id=reconciliation.id,
-        user_id=workout.user_id,
+        user_id=workout.user_id if workout else reconciliation.user_id,
         athlete_id=activity.athlete_id,
         combined_activity=combined,
-        plan_comparison=comparison,
+        plan_comparison=comparison if workout else [],
         actual_summary={
             "duration_minutes": round(activity.duration_seconds / 60, 1),
             "distance_meters": activity.distance_meters,
@@ -240,6 +252,8 @@ def render_managed_block(evaluation: ActivityEvaluation) -> str:
         parts.append(f"平均心拍: {facts['average_heartrate_bpm']:.0f} bpm")
     if evaluation.combined_activity:
         parts.append("複数予定をまとめて実施（予定別の数値配分はしていません）")
+    elif evaluation.planned_workout_id is None:
+        parts.append("計画外として記録（予定達成の判定はしていません）")
     elif evaluation.plan_comparison:
         parts.append("計画対比: " + "、".join(evaluation.plan_comparison))
     parts.append("次回: " + evaluation.next_advice)

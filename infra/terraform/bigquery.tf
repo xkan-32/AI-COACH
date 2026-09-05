@@ -268,7 +268,7 @@ resource "google_bigquery_table" "activity_evaluations" {
   schema = jsonencode([
     { name = "id", type = "STRING", mode = "REQUIRED" },
     { name = "activity_id", type = "STRING", mode = "REQUIRED" },
-    { name = "planned_workout_id", type = "STRING", mode = "REQUIRED" },
+    { name = "planned_workout_id", type = "STRING", mode = "NULLABLE" },
     { name = "reconciliation_id", type = "STRING", mode = "REQUIRED" },
     { name = "user_id", type = "STRING", mode = "REQUIRED" },
     { name = "athlete_id", type = "STRING", mode = "REQUIRED" },

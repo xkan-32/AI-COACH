@@ -729,7 +729,7 @@ async def _handle_reconciliation_postback(line_user_id: str, data: str) -> bool:
         expected_reconciliation_id=reconciliation_id,
         planned_workout_id=None if selected == "unplanned" else selected,
     )
-    if result.reconciliation.confirmed and result.reconciliation.planned_workout_id:
+    if result.reconciliation.confirmed:
         await runtime.evaluation_tasks.publish(activity.id, result.reconciliation.id)
     await runtime.messenger.send_text(line_user_id, "実績の対応を更新しました。")
     return True
@@ -1789,7 +1789,7 @@ async def decide_proposal_task(
 async def evaluate_activity_task(
     request: Request, task: ActivityEvaluationTask
 ) -> dict[str, str]:
-    """Evaluate only an explicitly confirmed planned activity in a task worker."""
+    """Evaluate an explicitly confirmed planned or unplanned activity in a task worker."""
     await verify_cloud_task_request(request, get_settings())
     activity = await runtime.activities.get(task.activity_id)
     reconciliation = await runtime.planning_history.get_reconciliation(
@@ -1800,25 +1800,28 @@ async def evaluate_activity_task(
         or reconciliation is None
         or not reconciliation.confirmed
         or reconciliation.activity_id != task.activity_id
-        or reconciliation.planned_workout_id is None
-        or reconciliation.plan_version_id is None
     ):
         return {"status": "not_evaluable"}
-    workout = next(
-        (
-            item
-            for item in await runtime.planning_history.list_workouts(
-                reconciliation.plan_version_id
-            )
-            if item.id == reconciliation.planned_workout_id
-        ),
-        None,
-    )
-    if workout is None:
-        return {"status": "not_evaluable"}
+    workout = None
+    if reconciliation.planned_workout_id is not None:
+        if reconciliation.plan_version_id is None:
+            return {"status": "not_evaluable"}
+        workout = next(
+            (
+                item
+                for item in await runtime.planning_history.list_workouts(
+                    reconciliation.plan_version_id
+                )
+                if item.id == reconciliation.planned_workout_id
+            ),
+            None,
+        )
+        if workout is None:
+            return {"status": "not_evaluable"}
     evaluation = create_evaluation(activity, workout, reconciliation)
     await runtime.evaluations.save(evaluation)
-    profile = await runtime.training_settings_state.get_profile(workout.user_id)
+    user_id = workout.user_id if workout is not None else reconciliation.user_id
+    profile = await runtime.training_settings_state.get_profile(user_id)
     if (
         profile is None
         or not profile.automatic_evaluation_publishing_enabled
@@ -1828,7 +1831,7 @@ async def evaluate_activity_task(
     if not await runtime.evaluation_publications.claim(evaluation):
         return {"status": "publication_duplicate"}
     token = await runtime.tokens.get(activity.athlete_id)
-    if token is None or token.line_user_id != workout.user_id:
+    if token is None or token.line_user_id != user_id:
         await runtime.evaluation_publications.fail(evaluation, "missing_strava_link")
         logger.warning(
             "activity_evaluation_publication_failed activity_id=%s evaluation_id=%s error=missing_strava_link",
@@ -1859,9 +1862,7 @@ async def evaluate_activity_task(
         return {"status": "publication_failed"}
     await runtime.evaluation_publications.complete(evaluation)
     try:
-        await runtime.messenger.send_text(
-            workout.user_id, "Stravaに評価を記載しました。"
-        )
+        await runtime.messenger.send_text(user_id, "Stravaに評価を記載しました。")
     except LineApiError:
         logger.warning(
             "activity_evaluation_push_failed activity_id=%s evaluation_id=%s",
