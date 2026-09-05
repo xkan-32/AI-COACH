@@ -90,6 +90,7 @@ from app.strava import StravaApiError, StravaOAuthClient, StravaOAuthError
 from app.web_settings import InvalidSettingsToken, SettingsTokenSigner
 from app.web_weekly_plan import (
     InvalidWeeklyPlanToken,
+    WeeklyPlanLink,
     WeeklyPlanWebSigner,
     build_training_dashboard_dto,
     build_weekly_plan_dto,
@@ -447,12 +448,14 @@ async def create_weekly_plan_url(line_user_id: str) -> str:
     if not base_url:
         raise PlanApprovalError("週間計画画面は現在利用できません。")
     service = _plan_approval_service()
-    plan = await service.current_for_line(line_user_id)
-    if plan is not None:
-        await service.present(plan)
-    else:
-        plan = await _active_plan_for_line(line_user_id)
-        if plan is None:
+    # A pending revision must not hide the active plan: the active plan is the
+    # only one that may be edited directly.
+    plan = await _active_plan_for_line(line_user_id)
+    if plan is None:
+        plan = await service.current_for_line(line_user_id)
+        if plan is not None:
+            await service.present(plan)
+        else:
             plan = await _generate_initial_plan_for_line(line_user_id)
             await service.present(plan)
     if plan is None:
@@ -1670,6 +1673,22 @@ async def apply_daily_workout_edit(
         )
     except (DailyWorkoutEditError, PlanVersionConflict) as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+    session_link = WeeklyPlanLink(
+        nonce="daily-edit-session",
+        line_user_id=line_user_id,
+        plan_id=replacement.id,
+        version=replacement.version,
+        expires_at=datetime.now(UTC) + timedelta(minutes=30),
+    )
+    response.set_cookie(
+        WEEKLY_PLAN_COOKIE,
+        _weekly_plan_signer().create_session(session_link),
+        max_age=30 * 60,
+        httponly=True,
+        secure=get_settings().app_env != "local",
+        samesite="strict",
+        path="/weekly-plan",
+    )
     response.headers["Cache-Control"] = "no-store"
     return {
         "status": "duplicate" if duplicate else "active",
