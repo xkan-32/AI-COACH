@@ -488,6 +488,53 @@ class PlanApprovalService:
     ) -> PlanApprovalState | None:
         return await self._states.get_latest_for_line(line_user_id)
 
+    async def recover_approved_orphan(
+        self, line_user_id: str
+    ) -> TrainingPlanVersion | None:
+        """Finish an approval whose active-pointer write was interrupted.
+
+        Approval state is immutable and may already be ``approved`` when a
+        transient failure occurs after its Firestore transaction.  Recovering
+        the same plan is safe only when no active plan exists for that week.
+        """
+        state = await self._states.get_latest_for_line(line_user_id)
+        if (
+            state is None
+            or state.status != PlanApprovalStatus.APPROVED
+            or state.decision != "approve"
+            or state.decided_at is None
+        ):
+            return None
+        plan = await self._history.get_plan(state.plan_id)
+        if (
+            plan is None
+            or plan.user_id != state.user_id
+            or plan.line_user_id != line_user_id
+            or plan.version != state.version
+        ):
+            raise PlanApprovalError("Approved plan target mismatch")
+        active_id = await self._pointers.get(plan.user_id, plan.week_start)
+        if active_id is not None:
+            return plan if active_id == plan.id else None
+        event = create_plan_lifecycle_event(
+            plan,
+            TrainingPlanStatus.PENDING_APPROVAL,
+            TrainingPlanStatus.ACTIVE,
+            "recover_approved_orphan",
+            f"recover-approved:{plan.id}:{plan.version}",
+            occurred_at=state.decided_at,
+        )
+        workouts = await self._history.list_workouts(plan.id)
+        try:
+            await PlanningService(
+                self._history, self._pointers
+            ).activate_approved_version(plan, workouts, event)
+        except Exception as exc:
+            raise PlanApprovalError(
+                "Approved plan recovery could not be completed"
+            ) from exc
+        return plan
+
     async def present(self, plan: TrainingPlanVersion) -> PlanApprovalState:
         if not plan.line_user_id:
             raise PlanApprovalError("Plan has no LINE owner")
@@ -526,6 +573,8 @@ class PlanApprovalService:
             line_user_id=line_user_id,
             decision=decision,
         )
+        if decision == "approve":
+            await self._ensure_activatable(plan)
         try:
             changed = await self._states.claim(
                 plan.id,
@@ -577,6 +626,19 @@ class PlanApprovalService:
         else:
             await self._history.save_lifecycle_event(event)
         return ("duplicate" if duplicate else target.value), event
+
+    async def _ensure_activatable(self, plan: TrainingPlanVersion) -> None:
+        current_id = await self._pointers.get(plan.user_id, plan.week_start)
+        if current_id == plan.id:
+            return
+        if current_id != plan.supersedes_plan_version_id:
+            raise PlanApprovalError("A newer plan version is already active")
+        if current_id is None and plan.supersedes_plan_version_id is not None:
+            raise PlanApprovalError("Plan predecessor is no longer active")
+        if current_id is not None:
+            current = await self._history.get_plan(current_id)
+            if current is None or plan.version != current.version + 1:
+                raise PlanApprovalError("Plan version is not the next active version")
 
 
 def _decision_status(decision: PlanDecision) -> PlanApprovalStatus:

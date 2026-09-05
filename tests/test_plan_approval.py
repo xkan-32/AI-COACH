@@ -11,6 +11,7 @@ from app.plan_approval import (
     PlanApprovalError,
     PlanApprovalService,
     PlanApprovalState,
+    PlanApprovalStatus,
     _firestore_approval_state_payload,
 )
 from app.planning import (
@@ -280,6 +281,76 @@ async def test_latest_state_remains_available_after_rejection() -> None:
     assert latest is not None
     assert latest.version == 1
     assert latest.status.value == "rejected"
+
+
+async def test_approved_orphan_is_recovered_without_rewriting_the_plan() -> None:
+    plan = make_plan(version=2)
+    history = InMemoryPlanningHistoryStore()
+    pointers = InMemoryActivePlanPointerStore()
+    states = InMemoryPlanApprovalStateStore()
+    service = PlanApprovalService(
+        states,
+        history,
+        pointers,
+        PlanActionSigner("secret", clock=lambda: NOW),
+        clock=lambda: NOW,
+    )
+    workout = create_planned_workout(
+        plan,
+        WEEK,
+        0,
+        "easy_run",
+        "easy",
+        target_duration_minutes=30,
+        created_at=NOW,
+    )
+    await history.save_plan(plan)
+    await history.save_workouts([workout])
+    await states.register_draft(
+        PlanApprovalState(
+            plan_id=plan.id,
+            version=plan.version,
+            week_start=plan.week_start,
+            user_id=plan.user_id,
+            line_user_id="line-1",
+            expires_at=NOW + timedelta(hours=1),
+            status=PlanApprovalStatus.APPROVED,
+            decision="approve",
+            decided_at=NOW,
+        )
+    )
+
+    recovered = await service.recover_approved_orphan("line-1")
+
+    assert recovered == plan
+    assert await pointers.get(plan.user_id, WEEK) == plan.id
+    assert await history.get_plan(plan.id) == plan
+    assert any(
+        event.reason_code == "recover_approved_orphan"
+        for event in history.lifecycle_events.values()
+    )
+
+
+async def test_unactivatable_approval_does_not_claim_pending_state() -> None:
+    service, states, history, _, signer, first, _, approval = await setup_service()
+    second = make_plan(version=2, supersedes=first.id)
+    await history.save_plan(second)
+    await states.register_draft(
+        approval.model_copy(update={"plan_id": second.id, "version": second.version})
+    )
+    await states.present(second.id, second.version, "line-1", NOW)
+
+    with pytest.raises(PlanApprovalError, match="active"):
+        await service.decide(
+            plan=second,
+            line_user_id="line-1",
+            decision="approve",
+            action_token=signer.create(
+                second.id, second.version, "line-1", "approve", approval.expires_at
+            ),
+        )
+
+    assert (await states.get(second.id)).status == PlanApprovalStatus.PENDING
 
 
 async def test_owner_and_stale_version_are_rejected() -> None:
