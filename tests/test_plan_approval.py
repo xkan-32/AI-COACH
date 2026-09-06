@@ -479,6 +479,7 @@ async def test_web_dto_has_seven_days_and_excludes_sensitive_snapshot() -> None:
     assert "画面へ返してはいけない" not in encoded
     assert "secret-route" not in encoded
     assert "input_snapshot" not in encoded
+    assert payload["plan"]["environment_labels"] == {}
 
 
 async def test_training_dashboard_puts_today_before_safe_activity_history() -> None:

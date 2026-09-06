@@ -31,7 +31,7 @@ from app.planning import (
 from app.training_response import derive_training_response_signal
 from app.workout_catalog import CATALOG, compatible_templates, prescribe
 
-PLAN_PROMPT_VERSION = "weekly-plan-v3"
+PLAN_PROMPT_VERSION = "weekly-plan-v4"
 PLAN_SAFETY_RULE_VERSION = "weekly-plan-safety-v2"
 MAX_WEEKLY_MINUTES = 600
 COLD_START_MAX_WEEKLY_MINUTES = 180
@@ -108,7 +108,12 @@ class VertexWeeklyPlanGenerator:
                     "diagnose, invent sensor values, or promise outcomes. Each workout "
                     "catalog structure is an adjustable example: respect its maximum "
                     "distance and duration, never exceed its fastest pace limit, and "
-                    "use only its allowed intensities."
+                    "use only its allowed intensities. In each daily rationale, give the "
+                    "user a concrete, ordered menu (warm-up, main set, recovery/cool-down "
+                    "where applicable). When the catalog or performance profile provides "
+                    "a heart-rate range, state it in bpm; otherwise state the applicable "
+                    "percentage of estimated maximum heart rate and make clear it is only "
+                    "a general guide. Never expose internal IDs or constraint codes."
                 ),
                 response_mime_type="application/json",
                 response_schema=WeeklyPlanOutput,
@@ -440,19 +445,26 @@ def build_weekly_plan_input(
         if conditions
         else "good"
     )
-    weekly_limit = min(
-        MAX_WEEKLY_MINUTES,
-        max(
-            COLD_START_MAX_WEEKLY_MINUTES,
-            int(recent_minutes * 1.2),
-        ),
-        sum(
-            sum(int(slot["max_workout_minutes"]) for slot in day["slots"])
-            for day in days
-        ),
+    recent_activity_limit = max(
+        COLD_START_MAX_WEEKLY_MINUTES, int(recent_minutes * 1.2)
+    )
+    available_minutes = sum(
+        sum(int(slot["max_workout_minutes"]) for slot in day["slots"]) for day in days
+    )
+    weekly_limit = min(MAX_WEEKLY_MINUTES, recent_activity_limit, available_minutes)
+    weekly_limit_basis = (
+        "recent_activity_120_percent"
+        if recent_minutes * 1.2 > COLD_START_MAX_WEEKLY_MINUTES
+        and weekly_limit == recent_activity_limit
+        else "available_time"
+        if weekly_limit == available_minutes
+        else "absolute_safety_cap"
+        if weekly_limit == MAX_WEEKLY_MINUTES
+        else "cold_start"
     )
     if latest_condition in {"pain", "discomfort"}:
         weekly_limit = min(weekly_limit, 120)
+        weekly_limit_basis = "condition_cap"
     maximum_moderate_days = (
         0 if latest_condition in {"pain", "discomfort", "fatigued"} else 2
     )
@@ -552,6 +564,7 @@ def build_weekly_plan_input(
                 (week_start + timedelta(days=offset)).isoformat() for offset in range(7)
             ],
             "weekly_duration_limit_minutes": weekly_limit,
+            "weekly_duration_limit_basis": weekly_limit_basis,
             "maximum_moderate_days": maximum_moderate_days,
             "no_consecutive_moderate_days": True,
             "latest_condition": latest_condition,
@@ -568,7 +581,11 @@ def build_weekly_plan_input(
             "A date may have multiple workouts only when they use different slots, or "
             "a single slot explicitly allows splitting. Never combine rest with another "
             "workout on the same date. Explain the weekly balance and each daily choice "
-            "in Japanese."
+            "in Japanese. Daily rationale must be an actionable sequence, not just a "
+            "label such as 'easy' or 'conversational pace'. Use the catalog's steps and "
+            "give a heart-rate target in bpm when a performance profile supplies one; "
+            "otherwise say '推定最大心拍の50〜70%' for easy/moderate aerobic work and "
+            "include the talk-test wording only as a secondary check."
         ),
     }
 
@@ -842,6 +859,7 @@ def _display_safety_constraints(plan_input: dict[str, Any]) -> list[str]:
     constraints = plan_input["hard_constraints"]
     result = [
         f"weekly_duration_limit_minutes:{constraints['weekly_duration_limit_minutes']}",
+        f"weekly_duration_limit_basis:{constraints['weekly_duration_limit_basis']}",
         f"maximum_moderate_days:{constraints['maximum_moderate_days']}",
         "no_consecutive_moderate_days",
         "availability_is_mandatory",
