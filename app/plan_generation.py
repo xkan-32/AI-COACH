@@ -331,29 +331,36 @@ class WeeklyPlanGenerationService:
             input_snapshot=plan_input,
             evaluated_at=now,
         )
-        lifecycle = create_plan_lifecycle_event(
+        generated_lifecycle = create_plan_lifecycle_event(
             plan,
             TrainingPlanStatus.GENERATING,
-            TrainingPlanStatus.ACTIVE if auto_activate else TrainingPlanStatus.DRAFT,
-            "scheduled_fallback_activated"
-            if auto_activate and used_fallback
-            else "scheduled_plan_activated"
-            if auto_activate
-            else "fallback_created"
-            if used_fallback
-            else "shadow_plan_generated",
+            TrainingPlanStatus.DRAFT,
+            "fallback_created" if used_fallback else "shadow_plan_generated",
             operation_id,
             occurred_at=now,
         )
         await self._history.save_plan(plan)
         await self._history.save_workouts(workouts)
         await self._history.save_safety_gate(gate)
-        await self._history.save_lifecycle_event(lifecycle)
+        await self._history.save_lifecycle_event(generated_lifecycle)
         if auto_activate:
             from app.planning import PlanningService
 
             await PlanningService(self._history, self._active_plans).activate_version(
                 plan, workouts
+            )
+            await self._history.save_lifecycle_event(
+                create_plan_lifecycle_event(
+                    plan,
+                    TrainingPlanStatus.DRAFT,
+                    TrainingPlanStatus.ACTIVE,
+                    "scheduled_fallback_activated"
+                    if used_fallback
+                    else "scheduled_plan_activated",
+                    f"{operation_id}:activate",
+                    scheduled_activation=True,
+                    occurred_at=now,
+                )
             )
         elif self._draft_registrar is not None:
             await self._draft_registrar.register_draft(plan)
