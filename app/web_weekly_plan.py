@@ -234,6 +234,13 @@ def build_weekly_plan_dto(
             "status": approval.status.value if approval is not None else "active",
             "rationale": plan.plan_rationale,
             "safety_constraints": list(plan.safety_flags),
+            "environment_labels": {
+                str(item["id"]): str(item["name"])
+                for item in (plan.input_snapshot.get("environments") or [])
+                if isinstance(item, dict)
+                and isinstance(item.get("id"), str)
+                and isinstance(item.get("name"), str)
+            },
             "training_response": _training_response_dto(plan.input_snapshot),
             "previous_version": previous_plan.version if previous_plan else None,
             "version_changes": _version_changes(

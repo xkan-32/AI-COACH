@@ -225,6 +225,10 @@ async def test_valid_shadow_plan_is_saved_without_sensitive_free_text() -> None:
     assert response["evidence_activity_ids"] == ["activity-1"]
     assert "位置情報らしき自由記述" not in encoded_input
     assert "体調自由記述" not in encoded_input
+    assert (
+        generator.inputs[0]["hard_constraints"]["weekly_duration_limit_basis"]
+        == "cold_start"
+    )
     assert history.safety_gate_results.popitem()[1].status == SafetyGateStatus.ALLOWED
 
 

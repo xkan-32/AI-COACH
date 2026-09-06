@@ -536,23 +536,7 @@ def prescribe(
         ),
         None,
     )
-    rationale = template.description
-    if (
-        template.id == "run-easy-v1"
-        and profile
-        and profile.get("pace_seconds_per_km", {}).get("easy")
-    ):
-        pace = profile["pace_seconds_per_km"]["easy"]
-        rationale += f"。目安は{pace['lower']}〜{pace['upper']}秒/km、苦しくなれば歩きへ切り替えます。"
-    elif (
-        template.id.startswith("bike")
-        and profile
-        and profile.get("heartrate_bpm", {}).get("easy")
-    ):
-        heart = profile["heartrate_bpm"]["easy"]
-        rationale += f"。目安心拍は{heart['lower']}〜{heart['upper']}bpm、会話可能度を優先します。"
-    elif template.sport == "bodyweight":
-        rationale += "。スクワット8回、ランジ各6回、プッシュアップ6回、デッドバグ各6回を2周、各種目の間は30秒休みます。"
+    rationale = _prescription_rationale(template, profile)
     return {
         "template_id": template.id,
         "workout_type": template.title,
@@ -561,6 +545,43 @@ def prescribe(
         "rationale": rationale,
         "outdoors": template.outdoors_allowed is True,
     }
+
+
+def _prescription_rationale(
+    template: WorkoutTemplate, profile: dict[str, Any] | None
+) -> str:
+    """Turn the structured catalog item into a concrete, display-ready fallback."""
+    steps = (template.structure or {}).get("steps") or []
+    sequence = "、".join(_step_label(step) for step in steps if _step_label(step))
+    rationale = template.description
+    if sequence:
+        rationale += f"。内容: {sequence}。"
+    if template.sport in {"running", "cycling"}:
+        pace = (profile or {}).get("pace_seconds_per_km", {}).get("easy")
+        if template.sport == "running" and pace:
+            rationale += f"ペース目安: {pace['lower']}〜{pace['upper']}秒/km。"
+        heart = (profile or {}).get("heartrate_bpm", {}).get("easy")
+        if heart:
+            rationale += (
+                f"目安心拍: {heart['lower']}〜{heart['upper']}bpm。"
+                "苦しくなればペースを落とすか、歩き・軽い回転へ切り替えます。"
+            )
+        else:
+            rationale += (
+                "目安心拍: 推定最大心拍の50〜70%（一般的な目安）。"
+                "例として40歳なら約90〜126bpmです。会話はできるが歌えない程度を上限にし、"
+                "体調・服薬・心疾患などで心拍が普段と異なる場合は数値を優先せず中止して専門家へ相談してください。"
+            )
+    return rationale
+
+
+def _step_label(step: dict[str, Any]) -> str:
+    name = str(step.get("name", ""))
+    detail = step.get("detail")
+    amount = step.get("duration_minutes") or step.get("distance_km")
+    if amount is None and step.get("duration_seconds") is not None:
+        amount = f"{step['duration_seconds']}秒"
+    return " ".join(str(part) for part in (name, amount, detail) if part)
 
 
 def _matches(

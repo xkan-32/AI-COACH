@@ -130,6 +130,24 @@ def test_prescribes_indoor_bike_without_claiming_ftp() -> None:
     assert "FTP" not in result["rationale"]
 
 
+def test_fallback_prescription_is_concrete_and_uses_general_hr_when_profile_is_missing() -> (
+    None
+):
+    result = prescribe(
+        {
+            "environment_ids": ["bike"],
+            "max_workout_minutes": 30,
+            "outdoors_allowed": False,
+        },
+        {"bike": "インドアバイク"},
+        [],
+    )
+
+    assert result is not None
+    assert "内容: ウォームアップ 10" in result["rationale"]
+    assert "推定最大心拍の50〜70%" in result["rationale"]
+
+
 def test_prescribes_bodyweight_for_home_environment() -> None:
     result = prescribe(
         {
