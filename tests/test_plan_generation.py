@@ -22,6 +22,7 @@ from app.plan_generation import (
 )
 from app.planning import (
     AvailabilitySlot,
+    InMemoryActivePlanPointerStore,
     InMemoryPlanningHistoryStore,
     InMemoryTrainingSettingsStore,
     SafetyGateStatus,
@@ -317,6 +318,32 @@ async def test_generator_failure_falls_back_and_retry_is_idempotent() -> None:
     assert len(history.plans) == 1
     assert len(history.workouts) == 7
     assert len(history.lifecycle_events) == 1
+
+
+async def test_auto_activated_plan_records_draft_then_active_lifecycle() -> None:
+    generator = CapturingGenerator(valid_output())
+    service, history = await build_service(generator)
+    service._active_plans = InMemoryActivePlanPointerStore()
+
+    result = await service.generate_shadow_plan(
+        user_id="line-1",
+        line_user_id="line-1",
+        week_start=WEEK_START,
+        plan_version=1,
+        generation_reason="scheduled",
+        input_revision="settings-1",
+        operation_id="scheduled-op",
+        now=NOW,
+        auto_activate=True,
+    )
+
+    assert result.status == TrainingPlanStatus.ACTIVE
+    assert {
+        (item.from_status, item.to_status) for item in history.lifecycle_events.values()
+    } == {
+        (TrainingPlanStatus.GENERATING, TrainingPlanStatus.DRAFT),
+        (TrainingPlanStatus.DRAFT, TrainingPlanStatus.ACTIVE),
+    }
 
 
 def test_manual_shadow_worker_endpoint_is_idempotent() -> None:

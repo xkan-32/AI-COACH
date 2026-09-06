@@ -1797,9 +1797,20 @@ def create_plan_lifecycle_event(
     to_status: TrainingPlanStatus,
     reason_code: str,
     operation_id: str,
+    *,
+    scheduled_activation: bool = False,
     **values: Any,
 ) -> TrainingPlanLifecycleEvent:
-    if to_status not in PLAN_TRANSITIONS[from_status]:
+    permitted_scheduled_activation = (
+        scheduled_activation
+        and from_status == TrainingPlanStatus.DRAFT
+        and to_status == TrainingPlanStatus.ACTIVE
+        and reason_code in {"scheduled_plan_activated", "scheduled_fallback_activated"}
+    )
+    if (
+        to_status not in PLAN_TRANSITIONS[from_status]
+        and not permitted_scheduled_activation
+    ):
         raise PlanVersionConflict(
             f"Invalid training plan transition: {from_status} -> {to_status}"
         )
