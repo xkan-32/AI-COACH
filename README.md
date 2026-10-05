@@ -34,7 +34,7 @@ Strava、LINE、Vertex AI、Cloud Runを使い、利用可能時間・場所・�
 
 詳細な正本は [docs/line-app-activity-implementation-plan.md](docs/line-app-activity-implementation-plan.md)、機能別ロードマップは [docs/feature-session-roadmap.md](docs/feature-session-roadmap.md) を参照してください。
 
-詳細は [docs/implementation-plan.md](docs/implementation-plan.md) と [docs/architecture.md](docs/architecture.md) を参照してください。 初回GCP/WIF/GitHub Actions構築は [docs/bootstrap-and-cicd.md](docs/bootstrap-and-cicd.md) に手順があります。
+詳細は [docs/implementation-plan.md](docs/implementation-plan.md) と [docs/architecture.md](docs/architecture.md) を参照してください。 初回GCP/WIF/GitHub Actions構築は [docs/bootstrap-and-cicd.md](docs/bootstrap-and-cicd.md) に手順があります。ローカルからのgcloud・Terraform操作（plan、ローカルapply前の確認）は [docs/local-terraform-operations.md](docs/local-terraform-operations.md) を参照してください。
 
 LINEリッチメニューの現在地と実装計画は [docs/rich-menu-plan.md](docs/rich-menu-plan.md)、機能別Codexセッションの実装順・完了条件・引き継ぎテンプレートは [docs/feature-session-roadmap.md](docs/feature-session-roadmap.md) を参照してください。
 完了したPF-01の設計判断と実装記録は [docs/next-session-pf-01.md](docs/next-session-pf-01.md) にまとめています。AC-01、週間計画・実績評価・公開承認の基盤、PL-01Bの週間shadow生成、PL-01Cの週間計画画面と初回承認、MA-01のLINE手動Activity、WT-01の体重記録、PL-01Dの実績照合、PL-01EのWorkout Review・Readiness、PL-01Fの承認付き再計画、PL-01Gの練習メニューからの初回計画生成までコード上実装済みです。
