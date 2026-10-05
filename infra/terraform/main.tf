@@ -46,7 +46,27 @@ resource "google_artifact_registry_repository" "app" {
   location      = var.region
   repository_id = var.service_name
   format        = "DOCKER"
-  depends_on    = [google_project_service.required]
+
+  # Every main deploy pushes a new image. Keep recent images for rollback and
+  # delete older ones so storage does not grow without bound.
+  cleanup_policy_dry_run = false
+  cleanup_policies {
+    id     = "keep-recent-images"
+    action = "KEEP"
+    most_recent_versions {
+      keep_count = 10
+    }
+  }
+  cleanup_policies {
+    id     = "delete-old-images"
+    action = "DELETE"
+    condition {
+      tag_state  = "ANY"
+      older_than = "2592000s"
+    }
+  }
+
+  depends_on = [google_project_service.required]
 }
 
 resource "google_firestore_database" "state" {
@@ -71,9 +91,12 @@ resource "google_cloud_tasks_queue" "events" {
 resource "google_cloud_scheduler_job" "weekly_plan_dispatch" {
   name        = "ai-coach-weekly-plan-dispatch"
   description = "Fans out timezone-aware weekly plan generation tasks."
-  schedule    = "*/5 * * * *"
-  time_zone   = "Etc/UTC"
-  region      = var.region
+  # Dispatch only acts on Sunday in each user's local timezone. Local Sunday
+  # always falls on Saturday-Monday in UTC, so skip the other days to avoid
+  # waking Cloud Run needlessly.
+  schedule  = "*/5 * * * 6,0,1"
+  time_zone = "Etc/UTC"
+  region    = var.region
 
   http_target {
     http_method = "POST"
@@ -127,6 +150,9 @@ resource "google_cloud_run_v2_service" "api" {
       image = var.container_image
       resources {
         startup_cpu_boost = true
+        # Declaring resources disables the provider's request-based CPU default.
+        # Without cpu_idle, Cloud Run bills the instance for its whole lifetime.
+        cpu_idle = true
       }
       env {
         name  = "APP_ENV"
