@@ -15,3 +15,7 @@ terraform.tfvars
 # google-github-actions/auth generated credentials
 gha-creds-*.json
 infra/bootstrap/backend.tf
+
+# Local-only tool settings
+mise.local.toml
+.claude/settings.local.json

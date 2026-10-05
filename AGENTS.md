@@ -6,7 +6,7 @@ Build a safe, auditable AI training coach integrating Strava, LINE Messaging API
 
 ## Required workflow
 
-1. Read this file, `CODEX.md`, and relevant files before editing.
+1. Read this file, `CODEX.md`, the agent-specific file (`CLAUDE.md` for Claude Code), and relevant files before editing.
 2. Preserve user changes and keep changes focused.
 3. Add or update tests for behavior changes.
 4. Run tests and Terraform validation for relevant changes.
