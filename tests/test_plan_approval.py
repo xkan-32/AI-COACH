@@ -19,6 +19,7 @@ from app.planning import (
     InMemoryPlanningHistoryStore,
     ReconciliationStatus,
     TrainingPlanStatus,
+    UserTrainingProfile,
     create_plan_version,
     create_planned_workout,
     create_reconciliation,
@@ -516,18 +517,24 @@ def test_training_menu_opens_one_time_weekly_plan_and_approves() -> None:
     from app.main import app, runtime
 
     user = "weekly-web-integration-user"
+    # The training menu only resolves plans for the current or next local week,
+    # so derive the week from the real clock instead of a fixed date.
+    now = datetime.now(UTC)
+    week_start = UserTrainingProfile(
+        user_id=user, operation_id="weekly-web-profile"
+    ).local_week_start(now) + timedelta(days=7)
     with TestClient(app) as client:
         generated = client.post(
             "/tasks/plans/generate",
             json={
                 "user_id": user,
                 "line_user_id": user,
-                "week_start": "2026-09-07",
+                "week_start": week_start.isoformat(),
                 "plan_version": 1,
                 "generation_reason": "manual_shadow",
                 "input_revision": "weekly-web-1",
                 "operation_id": "weekly-web-op-1",
-                "requested_at": "2026-09-05T00:00:00Z",
+                "requested_at": now.isoformat(),
             },
         )
         assert generated.status_code == 202
